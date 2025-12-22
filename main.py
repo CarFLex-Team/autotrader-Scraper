@@ -147,7 +147,7 @@ def scrape_autotrader():
 
         json_text = match.group(1).replace("&quot;", '"')
         data = json.loads(json_text)
-
+        print(data)
         # Extract data
         page_props = data["props"]["pageProps"]
         number_of_results = page_props["numberOfResults"]
