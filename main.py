@@ -421,21 +421,6 @@ import warnings
 from playwright.sync_api import sync_playwright
 
 
-def fetch_html_with_playwright(url: str) -> str:
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled"]
-        )
-        page = browser.new_page()
-
-        page.goto(url, wait_until="networkidle", timeout=30000)
-
-        html = page.content()
-        browser.close()
-        return html
-
-
 warnings.filterwarnings("ignore")
 
 app = FastAPI(title="Autotrader Scraping API")
@@ -526,6 +511,51 @@ COOKIES = {
     '_clsk': '1husmi%5E1762772107776%5E3%5E0%5Eo.clarity.ms%2Fcollect',
     'panoramaId_expiry': '1762858506944',
 }
+from playwright.sync_api import sync_playwright
+from urllib.parse import urlencode
+
+def playwright_get(
+    url: str,
+    params: dict | None = None,
+    headers: dict | None = None,
+    cookies: dict | None = None,
+    timeout: int = 30000
+) -> str:
+    # Build URL with params (like requests)
+    if params:
+        url = f"{url}?{urlencode(params, doseq=True)}"
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"]
+        )
+
+        context = browser.new_context(
+            extra_http_headers=headers or {}
+        )
+
+        # Convert requests-style cookies to Playwright format
+        if cookies:
+            context.add_cookies([
+                {
+                    "name": k,
+                    "value": v,
+                    "domain": url.split("//")[1].split("/")[0],
+                    "path": "/"
+                }
+                for k, v in cookies.items()
+            ])
+
+        page = context.new_page()
+        page.goto(url, wait_until="networkidle", timeout=timeout)
+
+        html = page.content()
+
+        context.close()
+        browser.close()
+
+        return html
 
 # =============================
 # FASTAPI ENDPOINTS
@@ -546,21 +576,35 @@ def scrape_autotrader():
     Scrape Autotrader listings and return structured data
     """
     try:
-        html = fetch_html_with_playwright(URL)
+        # Make request
+        # response = requests.get(
+        #     URL,
+        #     params=PARAMS,
+        #     headers=HEADERS,
+        #     cookies=COOKIES,
+        #     verify=False,
+        #     timeout=30
+        # )
+        html = playwright_get(
+            URL,
+            params=PARAMS,
+            headers=HEADERS,
+            cookies=COOKIES,
+            timeout=30000
+        )
+        # if response.status_code != 200:
+        #     raise HTTPException(
+        #         status_code=500,
+        #         detail=f"Request failed with status code: {response.status_code}"
+        #     )
+
+        # html = response.text
         print(html[:500])
-
-        # Optional: detect Incapsula explicitly
-        if "Incapsula_Resource" in html:
-            raise HTTPException(
-                status_code=403,
-                detail="Blocked by Incapsula"
-            )
-
-        # Parse embedded JSON (UNCHANGED)
+        # Parse embedded JSON
         match = re.search(
-            r'<script[^>]+type=["\']application/(?:json|ld\+json)[^"\']*["\'][^>]*>(.*?)</script>',
+            r'<script[^>]+type="application/json"[^>]*>(.*?)</script>',
             html,
-            re.DOTALL | re.IGNORECASE
+            re.DOTALL
         )
 
         if not match:
@@ -568,7 +612,6 @@ def scrape_autotrader():
                 status_code=500,
                 detail="Embedded JSON not found in response"
             )
-
 
         json_text = match.group(1).replace("&quot;", '"')
         data = json.loads(json_text)
