@@ -51,7 +51,7 @@ def extract_embedded_data(html: str) -> dict:
 
     for pattern in patterns:
         match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
-        print("Pattern:", pattern, "Match:", match)
+ 
         if not match:
             continue
 
@@ -356,35 +356,35 @@ def scrape_kijiji():
 
     if r.status_code != 200:
         raise HTTPException(500, "Request failed")
-    try:
-        data = extract_embedded_data(r.text)
-        print ("Extracted data successfully", data)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Kijiji parsing failed: {str(e)}"
-        )
+    # try:
+    #     data = extract_embedded_data(r.text)
+        
+    # except Exception as e:
+    #     raise HTTPException(
+    #         status_code=500,
+    #         detail=f"Kijiji parsing failed: {str(e)}"
+    #     )
 
 
-    # match = re.search(
-    #     r'<script[^>]*type="application/json"[^>]*>(.*?)</script>',
-    #     r.text,
-    #     re.DOTALL,
-    # )
-    # print(r.text)
+    match = re.search(
+        r'<script[^>]*type="application/json"[^>]*>(.*?)</script>',
+        r.text,
+        re.DOTALL,
+    )
+    
 
-    # if not match:
-    #     raise HTTPException(500, "Embedded JSON not found")
+    if not match:
+        raise HTTPException(500, "Embedded JSON not found")
 
 
-    # raw_json = (
-    #     match.group(1)
-    #     .replace("&quot;", '"')
-    #     .replace("&amp;", "&")
-    #     .strip()
-    # )
+    raw_json = (
+        match.group(1)
+        .replace("&quot;", '"')
+        .replace("&amp;", "&")
+        .strip()
+    )
 
-    # data = json.loads(raw_json)
+    data = json.loads(raw_json)
 
     listings_map = find_autos_listings(data)
     now = datetime.now(timezone.utc)
@@ -403,11 +403,16 @@ def scrape_kijiji():
 
         activation = parse_kijiji_date(listing.get("activationDate"))
         sorting = parse_kijiji_date(listing.get("sortingDate"))
+        amount = listing.get("price", {}).get("amount")
 
+        if isinstance(amount, (int, float)):
+            price = amount // 100
+        else:
+            price = amount 
         results.append({
             "title": listing.get("title"),
             "description": listing.get("description"),
-            "price": listing.get("price", {}).get("amount"),
+            "price": price,
             "currency": "CAD",
             "url": listing.get("url"),
             "images": listing.get("imageUrls") or [],
