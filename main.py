@@ -51,6 +51,7 @@ def extract_embedded_data(html: str) -> dict:
 
     for pattern in patterns:
         match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
+        print("Pattern:", pattern, "Match:", match)
         if not match:
             continue
 
@@ -357,6 +358,7 @@ def scrape_kijiji():
         raise HTTPException(500, "Request failed")
     try:
         data = extract_embedded_data(r.text)
+        print ("Extracted data successfully", data)
     except Exception as e:
         raise HTTPException(
             status_code=500,
