@@ -157,10 +157,11 @@ def find_autos_listings(obj, results=None):
 @app.get("/")
 def read_root():
     return {
-        "message": "Autotrader Scraping API",
+        "message": "Scraping API",
         "endpoints": {
             "/scrape_autotrader": "GET - Scrape Autotrader listings",
-            "/scrape_autotrader_raw": "GET - Raw JSON response from Autotrader"
+            "/scrape_kijiji": "GET -  Scrape Kijiji listings",
+            "/fetch-marketplace": "GET -  Scrape marketplace listings"
         }
     }
 
@@ -277,15 +278,7 @@ def scrape_kijiji():
 
     if r.status_code != 200:
         raise HTTPException(500, "Request failed")
-    # try:
-    #     data = extract_embedded_data(r.text)
-        
-    # except Exception as e:
-    #     raise HTTPException(
-    #         status_code=500,
-    #         detail=f"Kijiji parsing failed: {str(e)}"
-    #     )
-
+  
 
     match = re.search(
         r'<script[^>]*type="application/json"[^>]*>(.*?)</script>',
