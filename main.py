@@ -113,6 +113,12 @@ COOKIES = {
     '_clsk': '1husmi%5E1762772107776%5E3%5E0%5Eo.clarity.ms%2Fcollect',
     'panoramaId_expiry': '1762858506944',
 }
+SCRAPINGBEE_API_KEY = "4Z7NQS4HD6KZ37X8R46ACMJLZ0JG2INPMVNVSTRZJ9RUK5EE305BFU9XX1FFUGIEBY1UG7PIIQE3GA54"
+TARGET_URL = "https://backend.getswoopa.com/api/marketplace/"
+AUTH_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY3MDI2MjQ3LCJpYXQiOjE3NjY5Mzk4NDcsImp0aSI6ImE5ZWJkYjQ0ZWE4ZTQ1ZjRiMjYwYTgzNGZkNmIzYTZmIiwidXNlcl9pZCI6Ijk1MjE2In0.Honc2MdInU8C23IHUHobq5GWf_xQPVxWvlL4JaewMR4"
+
+SCRAPINGBEE_ENDPOINT = "https://app.scrapingbee.com/api/v1"
+
 
 # =============================
 # HELPER FUNCTIONS
@@ -257,54 +263,7 @@ def scrape_autotrader():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
-# @app.get("/scrape_autotrader_raw")
-# def scrape_autotrader_raw():
-#     """
-#     Return raw JSON response from Autotrader (for debugging)
-#     """
-#     try:
-#         response = requests.get(
-#             URL,
-#             params=PARAMS,
-#             headers=HEADERS,
-#             cookies=COOKIES,
-#             verify=False,
-#             timeout=30
-#         )
-
-#         if response.status_code != 200:
-#             raise HTTPException(
-#                 status_code=500,
-#                 detail=f"Request failed with status code: {response.status_code}"
-#             )
-
-#         # Try to extract JSON
-#         html = response.text
-#         match = re.search(
-#             r'<script[^>]+type="application/json"[^>]*>(.*?)</script>',
-#             html,
-#             re.DOTALL
-#         )
-
-#         if match:
-#             json_text = match.group(1).replace("&quot;", '"')
-#             data = json.loads(json_text)
-#             return {
-#                 "success": True,
-#                 "has_embedded_json": True,
-#                 "data": data
-#             }
-#         else:
-#             return {
-#                 "success": True,
-#                 "has_embedded_json": False,
-#                 "html_length": len(html),
-#                 "preview": html[:500] + "..." if len(html) > 500 else html
-#             }
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-    
+# 
 @app.get("/scrape_kijiji")
 def scrape_kijiji():
 
@@ -403,6 +362,36 @@ def scrape_kijiji():
         "count": len(results),
         "cars": results,
     }
+@app.get("/fetch-marketplace")
+def fetch_marketplace():
+    try:
+        response = requests.get(
+            url=SCRAPINGBEE_ENDPOINT,
+            params={
+                "api_key": SCRAPINGBEE_API_KEY,
+                "url": TARGET_URL,
+                "premium_proxy": "true",
+                "country_code": "ca",
+                "forward_headers": "true"
+            },
+            headers={
+                "spb-accept": "application/json",
+                "spb-authorization": f"Bearer {AUTH_TOKEN}"
+            },
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=response.text
+            )
+
+        return response.json()
+
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # =============================
 # HEALTH CHECK
 # =============================
