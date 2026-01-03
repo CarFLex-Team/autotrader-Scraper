@@ -1,11 +1,15 @@
 
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException,Query
 import requests
 import json
 import re
 import warnings
 from datetime import datetime, timezone
+from fastapi.responses import FileResponse
+import pandas as pd
+import time
+import uuid
 warnings.filterwarnings("ignore")
 app = FastAPI(title=" Scraping API")
 # =============================
@@ -113,11 +117,17 @@ COOKIES = {
     '_clsk': '1husmi%5E1762772107776%5E3%5E0%5Eo.clarity.ms%2Fcollect',
     'panoramaId_expiry': '1762858506944',
 }
-SCRAPINGBEE_API_KEY = "4Z7NQS4HD6KZ37X8R46ACMJLZ0JG2INPMVNVSTRZJ9RUK5EE305BFU9XX1FFUGIEBY1UG7PIIQE3GA54"
-TARGET_URL = "https://backend.getswoopa.com/api/marketplace/"
-AUTH_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY3MDI2MjQ3LCJpYXQiOjE3NjY5Mzk4NDcsImp0aSI6ImE5ZWJkYjQ0ZWE4ZTQ1ZjRiMjYwYTgzNGZkNmIzYTZmIiwidXNlcl9pZCI6Ijk1MjE2In0.Honc2MdInU8C23IHUHobq5GWf_xQPVxWvlL4JaewMR4"
 
-SCRAPINGBEE_ENDPOINT = "https://app.scrapingbee.com/api/v1"
+SWOOPA_URL = "https://backend.getswoopa.com/api/marketplace/"
+SWOOPA_HEADERS = {
+    "Host": "backend.getswoopa.com",
+    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY3NTI1NjA0LCJpYXQiOjE3Njc0MzkyMDUsImp0aSI6IjJiMzIwYTc5MzcwZTRmZDBhNGExNjVjM2M4NzNlOTM5IiwidXNlcl9pZCI6Ijk1MjE2In0.WpvUVKG2idE6tBLCFjnZ9ht_bQEDwf5sAVbH3V-2HMw",
+    "Accept": "*/*",
+    "Content-Type": "application/json",
+    "Origin": "https://app.getswoopa.com",
+    "Referer": "https://app.getswoopa.com/",
+    "User-Agent": "Mozilla/5.0"
+}
 
 
 # =============================
@@ -356,34 +366,47 @@ def scrape_kijiji():
         "cars": results,
     }
 @app.get("/fetch-marketplace")
-def fetch_marketplace():
-    try:
-        response = requests.get(
-            url=SCRAPINGBEE_ENDPOINT,
-            params={
-                "api_key": SCRAPINGBEE_API_KEY,
-                "url": TARGET_URL,
-                "premium_proxy": "true",
-                "country_code": "ca",
-                "forward_headers": "true"
-            },
-            headers={
-                "spb-accept": "application/json",
-                "spb-authorization": f"Bearer {AUTH_TOKEN}"
-            },
-            timeout=30
+def fetch_marketplace(
+    pages: int = Query(1, ge=1, le=100),
+    export_csv: bool = False
+):
+    url = SWOOPA_URL
+    all_results = []
+
+    for page in range(1, pages + 1):
+        try:
+            r = requests.get(url, headers=SWOOPA_HEADERS, timeout=20)
+            r.raise_for_status()
+        except requests.RequestException as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+        data = r.json()
+        results = data.get("results", [])
+        all_results.extend(results)
+
+        url = data.get("next")
+        if not url:
+            break
+
+        time.sleep(1)
+
+    if not all_results:
+        return {"count": 0, "results": []}
+
+    if export_csv:
+        file_name = f"swoopa_{uuid.uuid4().hex}.csv"
+        df = pd.DataFrame(all_results)
+        df.to_csv(file_name, index=False, encoding="utf-8-sig")
+        return FileResponse(
+            path=file_name,
+            filename=file_name,
+            media_type="text/csv"
         )
 
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=response.text
-            )
-
-        return response.json()
-
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "count": len(all_results),
+        "results": all_results
+    }
 
 # =============================
 # HEALTH CHECK
