@@ -1,5 +1,5 @@
-
-
+from pydantic import BaseModel
+from transformers import pipeline
 from fastapi import FastAPI, HTTPException,Query
 import requests
 import json
@@ -12,6 +12,10 @@ import time
 import uuid
 warnings.filterwarnings("ignore")
 app = FastAPI(title=" Scraping API")
+classifier = pipeline("zero-shot-classification")
+
+class TextInput(BaseModel):
+    text: str
 # =============================
 # CONFIGURATION
 # =============================
@@ -171,7 +175,8 @@ def read_root():
         "endpoints": {
             "/scrape_autotrader": "GET - Scrape Autotrader listings",
             "/scrape_kijiji": "GET -  Scrape Kijiji listings",
-            "/fetch-marketplace": "GET -  Scrape marketplace listings"
+            "/fetch-marketplace": "GET -  Scrape marketplace listings",
+            "/check-scammer": "POST - Check if text indicates a real person or dealer"
         }
     }
 
@@ -407,7 +412,20 @@ def fetch_marketplace(
         "count": len(all_results),
         "results": all_results
     }
+@app.post("/check-scammer")
+def check_scammer(input: TextInput):
+    result = classifier(
+        input.text,
+        candidate_labels=["Real", "Dealer"]
+    )
 
+    is_real = result["labels"][0].strip() == "Real"
+
+    return {
+        "is_real": is_real,
+        "top_label": result["labels"][0],
+        "scores": dict(zip(result["labels"], result["scores"]))
+    }
 # =============================
 # HEALTH CHECK
 # =============================
