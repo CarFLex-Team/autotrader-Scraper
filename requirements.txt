@@ -2,5 +2,3 @@ fastapi
 uvicorn
 requests
 pandas
-transformers
-torch
