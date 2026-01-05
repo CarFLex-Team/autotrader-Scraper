@@ -12,7 +12,7 @@ import time
 import uuid
 warnings.filterwarnings("ignore")
 app = FastAPI(title=" Scraping API")
-classifier = pipeline("zero-shot-classification")
+
 
 class TextInput(BaseModel):
     text: str
