@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from transformers import pipeline
+
 from fastapi import FastAPI, HTTPException,Query
 import requests
 import json
