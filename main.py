@@ -125,7 +125,7 @@ COOKIES = {
 SWOOPA_URL = "https://backend.getswoopa.com/api/marketplace/"
 SWOOPA_HEADERS = {
     "Host": "backend.getswoopa.com",
-    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY3NTI1NjA0LCJpYXQiOjE3Njc0MzkyMDUsImp0aSI6IjJiMzIwYTc5MzcwZTRmZDBhNGExNjVjM2M4NzNlOTM5IiwidXNlcl9pZCI6Ijk1MjE2In0.WpvUVKG2idE6tBLCFjnZ9ht_bQEDwf5sAVbH3V-2HMw",
+    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY3NjM3NTgxLCJpYXQiOjE3Njc1NTExODEsImp0aSI6Ijg0ZDk1YWRlMjA5MzQyNjdiODU1M2Q2MWFhNmVmMjQ4IiwidXNlcl9pZCI6Ijk1MjE2In0.9R6wqcMJBoCQ9SsGO2bhgr8_34oBgU7RLDw-kgvtXS4",
     "Accept": "*/*",
     "Content-Type": "application/json",
     "Origin": "https://app.getswoopa.com",
@@ -412,20 +412,20 @@ def fetch_marketplace(
         "count": len(all_results),
         "results": all_results
     }
-@app.post("/check-scammer")
-def check_scammer(input: TextInput):
-    result = classifier(
-        input.text,
-        candidate_labels=["Real", "Dealer"]
-    )
+# @app.post("/check-scammer")
+# def check_scammer(input: TextInput):
+#     result = classifier(
+#         input.text,
+#         candidate_labels=["Real", "Dealer"]
+#     )
 
-    is_real = result["labels"][0].strip() == "Real"
+#     is_real = result["labels"][0].strip() == "Real"
 
-    return {
-        "is_real": is_real,
-        "top_label": result["labels"][0],
-        "scores": dict(zip(result["labels"], result["scores"]))
-    }
+#     return {
+#         "is_real": is_real,
+#         "top_label": result["labels"][0],
+#         "scores": dict(zip(result["labels"], result["scores"]))
+#     }
 # =============================
 # HEALTH CHECK
 # =============================
