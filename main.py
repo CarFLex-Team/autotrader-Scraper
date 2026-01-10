@@ -125,7 +125,7 @@ COOKIES = {
 SWOOPA_URL = "https://backend.getswoopa.com/api/marketplace/"
 SWOOPA_HEADERS = {
     "Host": "backend.getswoopa.com",
-    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY3ODIxNDg1LCJpYXQiOjE3Njc3MzUwODYsImp0aSI6IjMzZWEwNTQ3MjZlMzQwOTRiNWUyZTE1MmI4ZWQ4NDY0IiwidXNlcl9pZCI6Ijk1MjE2In0.JxB_vvXbDoYKyA8Wzx9nUA8VHEDHQG_5_X5tA-qhinY",
+    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY4MTYyNDEzLCJpYXQiOjE3NjgwNzYwMTQsImp0aSI6IjZmZmVhNzBlN2FkYzQ5ZDVhZmExMWU1YTBiYTMyYjU1IiwidXNlcl9pZCI6Ijk1MjE2In0.tgkX5Kbs8qCPr21Z88xQBGK6PV6TZEkZFxu7DhCgkoY",
     "Accept": "*/*",
     "Content-Type": "application/json",
     "Origin": "https://app.getswoopa.com",
