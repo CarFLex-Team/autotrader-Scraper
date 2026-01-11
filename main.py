@@ -148,17 +148,30 @@ COOKIES = {
     'panoramaId_expiry': '1762858506944',
 }
 
-SWOOPA_URL = "https://backend.getswoopa.com/api/marketplace/"
-SWOOPA_HEADERS = {
-    "Host": "backend.getswoopa.com",
-    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY4MTYyNDEzLCJpYXQiOjE3NjgwNzYwMTQsImp0aSI6IjZmZmVhNzBlN2FkYzQ5ZDVhZmExMWU1YTBiYTMyYjU1IiwidXNlcl9pZCI6Ijk1MjE2In0.tgkX5Kbs8qCPr21Z88xQBGK6PV6TZEkZFxu7DhCgkoY",
-    "Accept": "*/*",
-    "Content-Type": "application/json",
-    "Origin": "https://app.getswoopa.com",
-    "Referer": "https://app.getswoopa.com/",
-    "User-Agent": "Mozilla/5.0"
+SWOOPA_ACCOUNTS = {
+    "primary": {
+        "url": "https://backend.getswoopa.com/api/marketplace/",
+        "headers": {
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY4MjQ5MzgzLCJpYXQiOjE3NjgxNjI5ODMsImp0aSI6ImVlOTM2NGI3YWY0NjQ5YzU4MWZmYzY5MWZhMjEwMDNmIiwidXNlcl9pZCI6Ijk1MjE2In0.2L-N3KUPx-sBIrxxE5BVSYYlloTZkIkd6ZeIvgOr_oY",
+            "Accept": "/",
+            "Content-Type": "application/json",
+            "Origin": "https://app.getswoopa.com",
+            "Referer": "https://app.getswoopa.com/",
+            "User-Agent": "Mozilla/5.0",
+        }
+    },
+    "secondary": {
+        "url": "https://backend.getswoopa.com/api/marketplace/",
+        "headers": {
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY4MTY4MzYzLCJpYXQiOjE3NjgwODE5NjMsImp0aSI6ImY4ZDQ4NzU1Njk2YzQxYmE5M2Y5NzNiZGZjZThlZjc5IiwidXNlcl9pZCI6Ijk1MjE2In0.lkvY5iKCSIVssirfqcBBhJ8DsloPoOy48KJRVpdL-q4",
+            "Accept": "/",
+            "Content-Type": "application/json",
+            "Origin": "https://app.getswoopa.com",
+            "Referer": "https://app.getswoopa.com/",
+            "User-Agent": "Mozilla/5.0",
+        }
+    }
 }
-
 
 # =============================
 # HELPER FUNCTIONS
@@ -525,21 +538,24 @@ def scrape_kijiji():
 @app.get("/fetch-marketplace")
 def fetch_marketplace(
     pages: int = Query(1, ge=1, le=100),
+    account: str = Query("primary"),
     export_csv: bool = False
 ):
-    url = SWOOPA_URL
+    if account not in SWOOPA_ACCOUNTS:
+        raise HTTPException(400, "Invalid Swoopa account")
+
+    swoopa = SWOOPA_ACCOUNTS[account]
+    url = swoopa["url"]
+    headers = swoopa["headers"]
+
     all_results = []
 
-    for page in range(1, pages + 1):
-        try:
-            r = requests.get(url, headers=SWOOPA_HEADERS, timeout=20)
-            r.raise_for_status()
-        except requests.RequestException as e:
-            raise HTTPException(status_code=500, detail=str(e))
+    for _ in range(pages):
+        r = requests.get(url, headers=headers, timeout=20)
+        r.raise_for_status()
 
         data = r.json()
-        results = data.get("results", [])
-        all_results.extend(results)
+        all_results.extend(data.get("results", []))
 
         url = data.get("next")
         if not url:
@@ -547,20 +563,13 @@ def fetch_marketplace(
 
         time.sleep(1)
 
-    if not all_results:
-        return {"count": 0, "results": []}
-
     if export_csv:
-        file_name = f"swoopa_{uuid.uuid4().hex}.csv"
-        df = pd.DataFrame(all_results)
-        df.to_csv(file_name, index=False, encoding="utf-8-sig")
-        return FileResponse(
-            path=file_name,
-            filename=file_name,
-            media_type="text/csv"
-        )
+        file_name = f"swoopa_{account}_{uuid.uuid4().hex}.csv"
+        pd.DataFrame(all_results).to_csv(file_name, index=False)
+        return FileResponse(file_name, media_type="text/csv", filename=file_name)
 
     return {
+        "account": account,
         "count": len(all_results),
         "results": all_results
     }
