@@ -440,13 +440,13 @@ def health_check():
 def scrape_new_autotrader_listings():
   
 
-    NEW_URL = "https://www.autotrader.ca/rest/search"
+    # NEW_URL = "https://www.autotrader.ca/"
 
 
 
 
 
-    resp = requests.get(NEW_URL, params=PARAMS, headers=HEADERS, timeout=30)
+    resp = requests.get(URL, params=PARAMS, headers=HEADERS, timeout=30)
 
     print(resp.status_code)
     print(resp.text[:500])
