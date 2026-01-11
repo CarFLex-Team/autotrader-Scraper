@@ -15,15 +15,28 @@ app = FastAPI(title=" Scraping API")
 
 import json
 import re
-from playwright.sync_api import sync_playwright
-from fastapi import HTTPException
+from playwright.sync_api import sync_playwright,Browser
+import time
+import random
+import json
+from typing import Optional
 
+from fastapi.concurrency import run_in_threadpool
 
 class TextInput(BaseModel):
     text: str
 # =============================
 # CONFIGURATION
 # =============================
+MIN_DELAY = 5     # seconds
+MAX_DELAY = 10    # seconds
+MAX_SCRAPES_PER_BROWSER = 10
+COOLDOWN_ON_BLOCK = 90  # seconds
+_playwright = None
+_browser: Optional[Browser] = None
+_scrape_count = 0
+
+
 URLKIJII = "https://www.kijiji.ca/b-cars-trucks/sudbury/c174l1700245"
 
 PARAMSKIJII = {
@@ -44,6 +57,7 @@ COOKIESKIJII = {
     "kjses": "a3ada55c-3dda-4d3b-a2f1-5a2dc3e6d11e",
 }
 URL = "https://www.autotrader.ca/lst"
+
 NEW_AUT_URL = (
     "https://www.autotrader.ca/lst"
     "?atype=C&custtype=P&cy=CA&damaged_listing=exclude"
@@ -176,9 +190,139 @@ def find_autos_listings(obj, results=None):
             find_autos_listings(item, results)
 
     return results
+# ---------------------------
+# BROWSER LIFECYCLE
+# ---------------------------
+
+def start_browser():
+    global _playwright, _browser, _scrape_count
+
+    if _browser:
+        return
+
+    _playwright = sync_playwright().start()
+    _browser = _playwright.chromium.launch(
+        headless=True,
+        args=["--disable-blink-features=AutomationControlled"]
+    )
+    _scrape_count = 0
+    print("✅ Browser started")
+
+
+def restart_browser():
+    global _browser, _playwright, _scrape_count
+
+    try:
+        if _browser:
+            _browser.close()
+        if _playwright:
+            _playwright.stop()
+    except Exception:
+        pass
+
+    _browser = None
+    _playwright = None
+    _scrape_count = 0
+
+    print("🔄 Browser restarted")
+
+
+# ---------------------------
+# CORE SCRAPER
+# ---------------------------
+
+def scrape_autotrader_once():
+    global _scrape_count
+
+    start_browser()
+
+    context = _browser.new_context(
+        locale="en-CA",
+        user_agent=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        )
+    )
+
+    # Block heavy assets (KEEP JS)
+    context.route(
+        "**/*.{png,jpg,jpeg,webp,svg,woff,woff2}",
+        lambda route: route.abort()
+    )
+
+    page = context.new_page()
+
+    try:
+        page.goto(
+            NEW_AUT_URL,
+            wait_until="domcontentloaded",
+            timeout=120_000
+        )
+
+        # IMPORTANT: Read __NEXT_DATA__ immediately
+        data = page.evaluate("""
+        () => {
+            const el = document.getElementById('__NEXT_DATA__');
+            return el ? JSON.parse(el.textContent) : null;
+        }
+        """)
+
+        if not data:
+            raise RuntimeError("NEXT_DATA missing (throttled or interstitial)")
+
+        page_props = data["props"]["pageProps"]
+        cars = page_props.get("listings", [])
+        total_results = page_props.get("numberOfResults", 0)
+
+        results = []
+
+        for car in cars:
+            vehicle = car.get("vehicle", {})
+            price_data = car.get("price", {})
+            location = car.get("location", {})
+
+            results.append({
+                "title": f"{vehicle.get('modelYear', '')} {vehicle.get('make', '')} {vehicle.get('model', '')}".strip(),
+                "price": price_data.get("priceFormatted"),
+                "city": location.get("city"),
+                "mileage_km": vehicle.get("mileageInKm"),
+                "image": car["images"][0] if car.get("images") else None,
+                "url": car.get("url"),
+                "description": (car.get("description") or "").split("<br")[0],
+                "make": vehicle.get("make"),
+                "model": vehicle.get("model"),
+                "year": vehicle.get("modelYear"),
+            })
+
+        _scrape_count += 1
+
+        return {
+            "success": True,
+            "total_results": total_results,
+            "scraped_count": len(results),
+            "source": "AutoTrader",
+            "cars": results
+        }
+
+    finally:
+        context.close()
+
+        # Human-like delay
+        delay = random.uniform(MIN_DELAY, MAX_DELAY)
+        time.sleep(delay)
+
+        # Restart browser after threshold
+        if _scrape_count >= MAX_SCRAPES_PER_BROWSER:
+            print("⚠️ Scrape limit reached, cooling down…")
+            restart_browser()
+            time.sleep(COOLDOWN_ON_BLOCK)
+
+
 # =============================
 # FASTAPI ENDPOINTS
 # =============================
+
 @app.get("/")
 def read_root():
     return {
@@ -444,123 +588,16 @@ def fetch_marketplace(
 def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
 @app.get("/scrape_new_autotrader_listings")
-def scrape_new_autotrader_listings():
+async def scrape():
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled"]
-            )
-
-            context = browser.new_context(
-                locale="en-CA",
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/122.0.0.0 Safari/537.36"
-                )
-            )
-
-            page = context.new_page()
-
-            # Load page and execute JS
-            page.goto(
-            URL,
-            wait_until="domcontentloaded",
-            timeout=120_000
-                )
-
-            page.wait_for_selector(
-                "#__NEXT_DATA__",
-                state="attached",
-                timeout=30_000
-            )
-
-            data = page.evaluate("""
-            () => {
-                const el = document.querySelector('#__NEXT_DATA__');
-                return el ? JSON.parse(el.textContent) : null;
-            }
-            """)
-
-
-            html = page.content()
-            browser.close()
-
-        # Safety check
-        if len(html) < 5000:
-            raise HTTPException(
-                status_code=503,
-                detail="Blocked or JS failed (empty HTML)"
-            )
-
-        # --- SAME PARSING LOGIC YOU USED ---
-
-        match = re.search(
-            r'<script[^>]+type="application/json"[^>]*>(.*?)</script>',
-            html,
-            re.DOTALL
-        )
-
-        if not match:
-            raise HTTPException(
-                status_code=500,
-                detail="Embedded JSON not found"
-            )
-
-        data = json.loads(match.group(1))
-        page_props = data["props"]["pageProps"]
-
-        number_of_results = page_props["numberOfResults"]
-        cars = page_props["listings"]
-
-        results = []
-
-        for car in cars:
-            vehicle = car.get("vehicle", {})
-            price_data = car.get("price", {})
-            location = car.get("location", {})
-
-            make = vehicle.get("make", "")
-            model = vehicle.get("model", "")
-            year = vehicle.get("modelYear", "")
-            mileage = vehicle.get("mileageInKm")
-
-            price = price_data.get("priceFormatted", "")
-            city = location.get("city", "")
-            url = car.get("url", "")
-
-            image = car["images"][0] if car.get("images") else None
-            description = (
-                car.get("description", "").split("<br")[0]
-                if car.get("description") else ""
-            )
-
-            title = f"{year} {make} {model}".strip()
-
-            results.append({
-                "title": title,
-                "price": price,
-                "city": city,
-                "mileage_km": mileage,
-                "image": image,
-                "url": url,
-                "description": description,
-                "make": make,
-                "model": model,
-                "year": year
-            })
-
-        return {
-            "success": True,
-            "total_results": number_of_results,
-            "scraped_count": len(results),
-            "source": "AutoTrader",
-            "cars": results
-        }
-
+        return await run_in_threadpool(scrape_autotrader_once)
     except Exception as e:
+        # Hard reset on failure
+        restart_browser()
         raise HTTPException(
-            status_code=500,
+            status_code=503,
             detail=f"Autotrader scrape failed: {str(e)}"
         )
+@app.on_event("shutdown")
+def shutdown():
+    restart_browser()
