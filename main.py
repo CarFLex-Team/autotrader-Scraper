@@ -16,7 +16,7 @@ app = FastAPI(title=" Scraping API")
 
 import json
 import re
-from playwright.sync_api import async_playwright,Browser
+from playwright.async_api import async_playwright,Browser
 import time
 import random
 import json
