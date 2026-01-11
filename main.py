@@ -340,8 +340,10 @@ def read_root():
         "endpoints": {
             "/scrape_autotrader": "GET - Scrape Autotrader listings",
             "/scrape_kijiji": "GET -  Scrape Kijiji listings",
-            "/fetch-marketplace": "GET -  Scrape marketplace listings",
-            "/check-scammer": "POST - Check if text indicates a real person or dealer"
+            "/fetch-marketplace-primary": "GET -  Scrape primary marketplace listings",
+            "/fetch-marketplace-secondary": "GET -  Scrape secondary marketplace listings",
+            "/check-scammer": "POST - Check if text indicates a real person or dealer",
+            "/scrape_New_Autotrader": "GET - Scrape New Autotrader listings"
         }
     }
 
@@ -535,7 +537,7 @@ def scrape_kijiji():
         "count": len(results),
         "cars": results,
     }
-@app.get("/fetch-marketplace")
+@app.get("/fetch-marketplace-primary")
 def fetch_marketplace(
     pages: int = Query(1, ge=1, le=100),
     account: str = Query("primary"),
@@ -581,7 +583,57 @@ def fetch_marketplace(
         return FileResponse(file_name, media_type="text/csv", filename=file_name)
 
     return {
-        "account": account,
+       
+        "count": len(all_results),
+        "results": all_results
+    }
+@app.get("/fetch-marketplace-secondary")
+def fetch_marketplace(
+    pages: int = Query(1, ge=1, le=100),
+    account: str = Query("secondary"),
+    export_csv: bool = False
+):
+    if account not in SWOOPA_ACCOUNTS:
+        raise HTTPException(400, "Invalid Swoopa account")
+
+    swoopa = SWOOPA_ACCOUNTS[account]
+    url = swoopa["url"]
+    headers = swoopa["headers"]
+
+    all_results = []
+
+    for _ in range(pages):
+        try:
+            r = requests.get(url, headers=headers, timeout=20)
+            r.raise_for_status()
+        except requests.RequestException as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Swoopa {account} request failed: {str(e)}"
+            )
+
+        try:
+            data = r.json()
+        except ValueError:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Swoopa {account} returned non-JSON response"
+            )
+        all_results.extend(data.get("results", []))
+
+        url = data.get("next")
+        if not url:
+            break
+
+        time.sleep(1)
+
+    if export_csv:
+        file_name = f"swoopa_{account}_{uuid.uuid4().hex}.csv"
+        pd.DataFrame(all_results).to_csv(file_name, index=False)
+        return FileResponse(file_name, media_type="text/csv", filename=file_name)
+
+    return {
+      
         "count": len(all_results),
         "results": all_results
     }
