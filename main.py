@@ -31,8 +31,8 @@ class TextInput(BaseModel):
 # =============================
 MIN_DELAY = 5     # seconds
 MAX_DELAY = 10    # seconds
-MAX_SCRAPES_PER_BROWSER = 10
-COOLDOWN_ON_BLOCK = 90  # seconds
+MAX_SCRAPES_PER_BROWSER = 6
+COOLDOWN_ON_BLOCK = 45  # seconds
 _playwright = None
 _browser: Optional[Browser] = None
 _scrape_count = 0
