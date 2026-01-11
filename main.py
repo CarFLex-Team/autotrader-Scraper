@@ -464,7 +464,7 @@ def scrape_new_autotrader_listings():
             page = context.new_page()
 
             # Load page and execute JS
-            page.goto(NEW_AUT_URL, wait_until="networkidle", timeout=60000)
+            page.goto(NEW_AUT_URL,wait_until="domcontentloaded", timeout=120_000)
 
             # Ensure Next.js JSON is present
             page.wait_for_selector(
