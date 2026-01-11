@@ -1,3 +1,4 @@
+import asyncio
 from pydantic import BaseModel
 
 from fastapi import FastAPI, HTTPException,Query
@@ -194,7 +195,7 @@ def find_autos_listings(obj, results=None):
 # BROWSER LIFECYCLE
 # ---------------------------
 
-def start_browser():
+async def start_browser():
     global _playwright, _browser, _scrape_count
 
     if _browser:
@@ -209,21 +210,20 @@ def start_browser():
     print("✅ Browser started")
 
 
-def restart_browser():
+async def restart_browser():
     global _browser, _playwright, _scrape_count
 
     try:
         if _browser:
-            _browser.close()
+            await _browser.close()
         if _playwright:
-            _playwright.stop()
+            await _playwright.stop()
     except Exception:
         pass
 
     _browser = None
     _playwright = None
     _scrape_count = 0
-
     print("🔄 Browser restarted")
 
 
@@ -231,12 +231,12 @@ def restart_browser():
 # CORE SCRAPER
 # ---------------------------
 
-def scrape_autotrader_once():
+async def scrape_autotrader_once():
     global _scrape_count
 
-    start_browser()
+    await start_browser()
 
-    context = _browser.new_context(
+    context = await _browser.new_context(
         locale="en-CA",
         user_agent=(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -245,23 +245,22 @@ def scrape_autotrader_once():
         )
     )
 
-    # Block heavy assets (KEEP JS)
-    context.route(
+    # Block heavy assets (keep JS)
+    await context.route(
         "**/*.{png,jpg,jpeg,webp,svg,woff,woff2}",
-        lambda route: route.abort()
+        lambda route: asyncio.create_task(route.abort())
     )
 
-    page = context.new_page()
+    page = await context.new_page()
 
     try:
-        page.goto(
+        await page.goto(
             NEW_AUT_URL,
             wait_until="domcontentloaded",
             timeout=120_000
         )
 
-        # IMPORTANT: Read __NEXT_DATA__ immediately
-        data = page.evaluate("""
+        data = await page.evaluate("""
         () => {
             const el = document.getElementById('__NEXT_DATA__');
             return el ? JSON.parse(el.textContent) : null;
@@ -306,18 +305,16 @@ def scrape_autotrader_once():
         }
 
     finally:
-        context.close()
+        await context.close()
 
         # Human-like delay
-        delay = random.uniform(MIN_DELAY, MAX_DELAY)
-        time.sleep(delay)
+        await asyncio.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
 
         # Restart browser after threshold
         if _scrape_count >= MAX_SCRAPES_PER_BROWSER:
             print("⚠️ Scrape limit reached, cooling down…")
-            restart_browser()
-            time.sleep(COOLDOWN_ON_BLOCK)
-
+            await restart_browser()
+            await asyncio.sleep(COOLDOWN_ON_BLOCK)
 
 # =============================
 # FASTAPI ENDPOINTS
@@ -589,15 +586,14 @@ def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
 @app.get("/scrape_new_autotrader_listings")
 async def scrape():
-    try:
-        return await run_in_threadpool(scrape_autotrader_once)
-    except Exception as e:
-        # Hard reset on failure
-        restart_browser()
-        raise HTTPException(
-            status_code=503,
-            detail=f"Autotrader scrape failed: {str(e)}"
-        )
+        try:
+            return await scrape_autotrader_once()
+        except Exception as e:
+            await restart_browser()
+            raise HTTPException(
+                status_code=503,
+                detail=f"Autotrader scrape failed: {str(e)}"
+            )
 @app.on_event("shutdown")
-def shutdown():
-    restart_browser()
+async def shutdown():
+    await restart_browser()
