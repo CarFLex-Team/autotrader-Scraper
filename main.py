@@ -53,28 +53,19 @@ PARAMS = {
     "sort": "age",
     "ustate": "N,U",
     "zip": "Spanish, ON",
-    "zipr": "1000"
+    "zipr": "1000",
+    
 }
 
 HEADERS = {
-    'Host': 'www.autotrader.ca',
-    'Cache-Control': 'max-age=0',
-    'Sec-Ch-Ua': '"Not_A Brand";v="99", "Chromium";v="142"',
-    'Sec-Ch-Ua-Mobile': '?0',
-    'Sec-Ch-Ua-Platform': '"Windows"',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Upgrade-Insecure-Requests': '1',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-    # 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-    'Sec-Fetch-Site': 'same-origin',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-User': '?1',
-    'Sec-Fetch-Dest': 'document',
-    'Priority': 'u=0, i',
-
-    "Accept": "application/json, text/plain, */*",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "en-CA,en;q=0.9",
     "Referer": "https://www.autotrader.ca/",
-    "Origin": "https://www.autotrader.ca"
 }
 
 COOKIES = {
@@ -195,7 +186,7 @@ def scrape_autotrader():
             URL,
             params=PARAMS,
             headers=HEADERS,
-            cookies=COOKIES,
+            # cookies=COOKIES,
             verify=False,
             timeout=30
         )
@@ -205,7 +196,6 @@ def scrape_autotrader():
                 status_code=500,
                 detail=f"Request failed with status code: {response.status_code}"
             )
-
         html = response.text
         # Parse embedded JSON
         match = re.search(
@@ -213,7 +203,6 @@ def scrape_autotrader():
             html,
             re.DOTALL
         )
-
         if not match:
             raise HTTPException(
                 status_code=500,
@@ -439,12 +428,7 @@ def health_check():
 @app.get("/scrape_new_autotrader_listings")
 def scrape_new_autotrader_listings():
   
-
     # NEW_URL = "https://www.autotrader.ca/"
-
-
-
-
 
     resp = requests.get(URL, params=PARAMS, headers=HEADERS, timeout=30)
 
