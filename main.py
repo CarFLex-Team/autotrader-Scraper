@@ -16,7 +16,7 @@ app = FastAPI(title=" Scraping API")
 
 import json
 import re
-from playwright.sync_api import sync_playwright,Browser
+from playwright.sync_api import async_playwright,Browser
 import time
 import random
 import json
@@ -201,8 +201,8 @@ async def start_browser():
     if _browser:
         return
 
-    _playwright = sync_playwright().start()
-    _browser = _playwright.chromium.launch(
+    _playwright = await async_playwright().start()
+    _browser = await _playwright.chromium.launch(
         headless=True,
         args=["--disable-blink-features=AutomationControlled"]
     )
