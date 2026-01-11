@@ -464,13 +464,25 @@ def scrape_new_autotrader_listings():
             page = context.new_page()
 
             # Load page and execute JS
-            page.goto(NEW_AUT_URL,wait_until="domcontentloaded", timeout=120_000)
+            page.goto(
+            URL,
+            wait_until="domcontentloaded",
+            timeout=120_000
+                )
 
-            # Ensure Next.js JSON is present
             page.wait_for_selector(
-                "script[type='application/json']",
-                timeout=15000
+                "#__NEXT_DATA__",
+                state="attached",
+                timeout=30_000
             )
+
+            data = page.evaluate("""
+            () => {
+                const el = document.querySelector('#__NEXT_DATA__');
+                return el ? JSON.parse(el.textContent) : null;
+            }
+            """)
+
 
             html = page.content()
             browser.close()
