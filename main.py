@@ -153,7 +153,7 @@ SWOOPA_ACCOUNTS = {
         "url": "https://backend.getswoopa.com/api/marketplace/",
         "headers": {
             "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY4MjQ5MzgzLCJpYXQiOjE3NjgxNjI5ODMsImp0aSI6ImVlOTM2NGI3YWY0NjQ5YzU4MWZmYzY5MWZhMjEwMDNmIiwidXNlcl9pZCI6Ijk1MjE2In0.2L-N3KUPx-sBIrxxE5BVSYYlloTZkIkd6ZeIvgOr_oY",
-            "Accept": "/",
+            "Accept": "*/*",
             "Content-Type": "application/json",
             "Origin": "https://app.getswoopa.com",
             "Referer": "https://app.getswoopa.com/",
@@ -164,7 +164,7 @@ SWOOPA_ACCOUNTS = {
         "url": "https://backend.getswoopa.com/api/marketplace/",
         "headers": {
             "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY4MTY4MzYzLCJpYXQiOjE3NjgwODE5NjMsImp0aSI6ImY4ZDQ4NzU1Njk2YzQxYmE5M2Y5NzNiZGZjZThlZjc5IiwidXNlcl9pZCI6Ijk1MjE2In0.lkvY5iKCSIVssirfqcBBhJ8DsloPoOy48KJRVpdL-q4",
-            "Accept": "/",
+            "Accept": "*/*",
             "Content-Type": "application/json",
             "Origin": "https://app.getswoopa.com",
             "Referer": "https://app.getswoopa.com/",
@@ -551,10 +551,22 @@ def fetch_marketplace(
     all_results = []
 
     for _ in range(pages):
-        r = requests.get(url, headers=headers, timeout=20)
-        r.raise_for_status()
+        try:
+            r = requests.get(url, headers=headers, timeout=20)
+            r.raise_for_status()
+        except requests.RequestException as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Swoopa {account} request failed: {str(e)}"
+            )
 
-        data = r.json()
+        try:
+            data = r.json()
+        except ValueError:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Swoopa {account} returned non-JSON response"
+            )
         all_results.extend(data.get("results", []))
 
         url = data.get("next")
