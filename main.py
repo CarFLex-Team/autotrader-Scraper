@@ -38,7 +38,7 @@ HEADERSKIJII = {
 COOKIESKIJII = {
     "kjses": "a3ada55c-3dda-4d3b-a2f1-5a2dc3e6d11e",
 }
-URL = "https://www.autotrader.ca/lst"
+URL = "https://www.autotrader.ca/rest/search"
 
 PARAMS = {
     "atype": "C",
@@ -54,19 +54,18 @@ PARAMS = {
     "ustate": "N,U",
     "zip": "Spanish, ON",
     "zipr": "1000",
-    
+    "page": 1
 }
-
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/122.0.0.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml",
-    "Accept-Language": "en-CA,en;q=0.9",
+    "Accept": "application/json, text/plain, */*",
     "Referer": "https://www.autotrader.ca/",
 }
+
 
 COOKIES = {
     'as24Visitor': 'c3c760d9-0878-408d-a19b-2180d1931375',
@@ -430,7 +429,8 @@ def scrape_new_autotrader_listings():
   
     # NEW_URL = "https://www.autotrader.ca/"
 
-    resp = requests.get(URL, params=PARAMS, headers=HEADERS, timeout=30)
+    response = requests.get(URL, params=PARAMS, headers=HEADERS, timeout=30)
 
-    print(resp.status_code)
-    print(resp.text[:500])
+    print(response.status_code)
+    print(response.headers.get("Content-Type"))
+    print(response.text[:500])
