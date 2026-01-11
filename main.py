@@ -13,6 +13,11 @@ import uuid
 warnings.filterwarnings("ignore")
 app = FastAPI(title=" Scraping API")
 
+import json
+import re
+from playwright.sync_api import sync_playwright
+from fastapi import HTTPException
+
 
 class TextInput(BaseModel):
     text: str
@@ -38,8 +43,14 @@ HEADERSKIJII = {
 COOKIESKIJII = {
     "kjses": "a3ada55c-3dda-4d3b-a2f1-5a2dc3e6d11e",
 }
-URL = "https://www.autotrader.ca/rest/search"
-
+URL = "https://www.autotrader.ca/lst"
+NEW_AUT_URL = (
+    "https://www.autotrader.ca/lst"
+    "?atype=C&custtype=P&cy=CA&damaged_listing=exclude"
+    "&desc=1&lat=46.20007&lon=-82.34984"
+    "&offer=U&size=40&sort=age&ustate=N,U"
+    "&zip=Spanish,%20ON&zipr=1000"
+)
 PARAMS = {
     "atype": "C",
     "custtype": "P",
@@ -53,19 +64,25 @@ PARAMS = {
     "sort": "age",
     "ustate": "N,U",
     "zip": "Spanish, ON",
-    "zipr": "1000",
-    "page": 1
-}
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json, text/plain, */*",
-    "Referer": "https://www.autotrader.ca/",
+    "zipr": "1000"
 }
 
+HEADERS = {
+    'Host': 'www.autotrader.ca',
+    'Cache-Control': 'max-age=0',
+    'Sec-Ch-Ua': '"Not_A Brand";v="99", "Chromium";v="142"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-User': '?1',
+    'Sec-Fetch-Dest': 'document',
+    'Priority': 'u=0, i',
+}
 
 COOKIES = {
     'as24Visitor': 'c3c760d9-0878-408d-a19b-2180d1931375',
@@ -185,7 +202,7 @@ def scrape_autotrader():
             URL,
             params=PARAMS,
             headers=HEADERS,
-            # cookies=COOKIES,
+            cookies=COOKIES,
             verify=False,
             timeout=30
         )
@@ -195,6 +212,7 @@ def scrape_autotrader():
                 status_code=500,
                 detail=f"Request failed with status code: {response.status_code}"
             )
+
         html = response.text
         # Parse embedded JSON
         match = re.search(
@@ -202,6 +220,7 @@ def scrape_autotrader():
             html,
             re.DOTALL
         )
+
         if not match:
             raise HTTPException(
                 status_code=500,
@@ -426,11 +445,110 @@ def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
 @app.get("/scrape_new_autotrader_listings")
 def scrape_new_autotrader_listings():
-  
-    # NEW_URL = "https://www.autotrader.ca/"
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"]
+            )
 
-    response = requests.get(URL, params=PARAMS, headers=HEADERS, timeout=30)
+            context = browser.new_context(
+                locale="en-CA",
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                )
+            )
 
-    print(response.status_code)
-    print(response.headers.get("Content-Type"))
-    print(response.text[:500])
+            page = context.new_page()
+
+            # Load page and execute JS
+            page.goto(NEW_AUT_URL, wait_until="networkidle", timeout=60000)
+
+            # Ensure Next.js JSON is present
+            page.wait_for_selector(
+                "script[type='application/json']",
+                timeout=15000
+            )
+
+            html = page.content()
+            browser.close()
+
+        # Safety check
+        if len(html) < 5000:
+            raise HTTPException(
+                status_code=503,
+                detail="Blocked or JS failed (empty HTML)"
+            )
+
+        # --- SAME PARSING LOGIC YOU USED ---
+
+        match = re.search(
+            r'<script[^>]+type="application/json"[^>]*>(.*?)</script>',
+            html,
+            re.DOTALL
+        )
+
+        if not match:
+            raise HTTPException(
+                status_code=500,
+                detail="Embedded JSON not found"
+            )
+
+        data = json.loads(match.group(1))
+        page_props = data["props"]["pageProps"]
+
+        number_of_results = page_props["numberOfResults"]
+        cars = page_props["listings"]
+
+        results = []
+
+        for car in cars:
+            vehicle = car.get("vehicle", {})
+            price_data = car.get("price", {})
+            location = car.get("location", {})
+
+            make = vehicle.get("make", "")
+            model = vehicle.get("model", "")
+            year = vehicle.get("modelYear", "")
+            mileage = vehicle.get("mileageInKm")
+
+            price = price_data.get("priceFormatted", "")
+            city = location.get("city", "")
+            url = car.get("url", "")
+
+            image = car["images"][0] if car.get("images") else None
+            description = (
+                car.get("description", "").split("<br")[0]
+                if car.get("description") else ""
+            )
+
+            title = f"{year} {make} {model}".strip()
+
+            results.append({
+                "title": title,
+                "price": price,
+                "city": city,
+                "mileage_km": mileage,
+                "image": image,
+                "url": url,
+                "description": description,
+                "make": make,
+                "model": model,
+                "year": year
+            })
+
+        return {
+            "success": True,
+            "total_results": number_of_results,
+            "scraped_count": len(results),
+            "source": "AutoTrader",
+            "cars": results
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Autotrader scrape failed: {str(e)}"
+        )
