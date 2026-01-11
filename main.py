@@ -65,12 +65,16 @@ HEADERS = {
     'Accept-Language': 'en-US,en;q=0.9',
     'Upgrade-Insecure-Requests': '1',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    # 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
     'Sec-Fetch-Site': 'same-origin',
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-User': '?1',
     'Sec-Fetch-Dest': 'document',
     'Priority': 'u=0, i',
+
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.autotrader.ca/",
+    "Origin": "https://www.autotrader.ca"
 }
 
 COOKIES = {
@@ -432,3 +436,17 @@ def fetch_marketplace(
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
+@app.get("/scrape_new_autotrader_listings")
+def scrape_new_autotrader_listings():
+  
+
+    NEW_URL = "https://www.autotrader.ca/rest/search"
+
+
+
+
+
+    resp = requests.get(NEW_URL, params=PARAMS, headers=HEADERS, timeout=30)
+
+    print(resp.status_code)
+    print(resp.text[:500])
