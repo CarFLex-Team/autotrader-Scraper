@@ -1,7 +1,11 @@
+from playwright.async_api import async_playwright, Browser
+from fastapi.concurrency import run_in_threadpool
+from typing import Optional
+import random
 import asyncio
 from pydantic import BaseModel
 
-from fastapi import FastAPI, HTTPException,Query
+from fastapi import FastAPI, HTTPException, Query
 import requests
 import json
 import re
@@ -14,18 +18,11 @@ import uuid
 warnings.filterwarnings("ignore")
 app = FastAPI(title=" Scraping API")
 
-import json
-import re
-from playwright.async_api import async_playwright,Browser
-import time
-import random
-import json
-from typing import Optional
-
-from fastapi.concurrency import run_in_threadpool
 
 class TextInput(BaseModel):
     text: str
+
+
 # =============================
 # CONFIGURATION
 # =============================
@@ -152,7 +149,7 @@ SWOOPA_ACCOUNTS = {
     "primary": {
         "url": "https://backend.getswoopa.com/api/marketplace/",
         "headers": {
-            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY4NDE0ODEwLCJpYXQiOjE3NjgzMjg0MTAsImp0aSI6ImZmMDI2MGIwODkxMjQ0OTNhMjliMTUyMDU4ZWYxMmU4IiwidXNlcl9pZCI6Ijk1MjE2In0.Rg41F1-q7YAscRJdFkp36mCuJ3nDYPBL5_Jmu9BAXvY",
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY4NTkxNDg5LCJpYXQiOjE3Njg1MDUwOTAsImp0aSI6IjFiMTU0YzAxYTM2YjRkMWZhYTI0ODNjNTBjN2Q4MWQ0IiwidXNlcl9pZCI6Ijk1MjE2In0.3LnbtoHsdJAPrUAd9wZNoLRBBfcWadRlBy_kRbnG-Es",
             "Accept": "*/*",
             "Content-Type": "application/json",
             "Origin": "https://app.getswoopa.com",
@@ -176,6 +173,8 @@ SWOOPA_ACCOUNTS = {
 # =============================
 # HELPER FUNCTIONS
 # =============================
+
+
 def parse_kijiji_date(date_str):
     if not date_str:
         return None
@@ -187,6 +186,7 @@ def parse_kijiji_date(date_str):
         return datetime.strptime(
             date_str, "%Y-%m-%dT%H:%M:%SZ"
         ).replace(tzinfo=timezone.utc)
+
 
 def find_autos_listings(obj, results=None):
     if results is None:
@@ -207,6 +207,7 @@ def find_autos_listings(obj, results=None):
 # ---------------------------
 # BROWSER LIFECYCLE
 # ---------------------------
+
 
 async def start_browser():
     global _playwright, _browser, _scrape_count
@@ -333,6 +334,7 @@ async def scrape_autotrader_once():
 # FASTAPI ENDPOINTS
 # =============================
 
+
 @app.get("/")
 def read_root():
     return {
@@ -346,6 +348,7 @@ def read_root():
             "/scrape_New_Autotrader": "GET - Scrape New Autotrader listings"
         }
     }
+
 
 @app.get("/scrape_autotrader")
 def scrape_autotrader():
@@ -362,7 +365,7 @@ def scrape_autotrader():
             verify=False,
             timeout=30
         )
-        
+
         if response.status_code != 200:
             raise HTTPException(
                 status_code=500,
@@ -408,7 +411,8 @@ def scrape_autotrader():
             url = car.get("url", "")
 
             image = car["images"][0] if car.get("images") else None
-            description = car.get("description", "").split("<br")[0] if car.get("description") else ""
+            description = car.get("description", "").split(
+                "<br")[0] if car.get("description") else ""
 
             title = f"{year} {make} {model}".strip()
 
@@ -424,7 +428,7 @@ def scrape_autotrader():
                 "model": model,
                 "year": year
             }
-            
+
             results.append(car_data)
 
         return {
@@ -440,13 +444,18 @@ def scrape_autotrader():
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Request error: {str(e)}")
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"JSON parsing error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"JSON parsing error: {str(e)}")
     except KeyError as e:
-        raise HTTPException(status_code=500, detail=f"Missing expected data field: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Missing expected data field: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Unexpected error: {str(e)}")
 
-# 
+#
+
+
 @app.get("/scrape_kijiji")
 def scrape_kijiji():
 
@@ -460,18 +469,15 @@ def scrape_kijiji():
 
     if r.status_code != 200:
         raise HTTPException(500, "Request failed")
-  
 
     match = re.search(
         r'<script[^>]*type="application/json"[^>]*>(.*?)</script>',
         r.text,
         re.DOTALL,
     )
-    
 
     if not match:
         raise HTTPException(500, "Embedded JSON not found")
-
 
     raw_json = (
         match.group(1)
@@ -504,7 +510,7 @@ def scrape_kijiji():
         if isinstance(amount, (int, float)):
             price = amount // 100
         else:
-            price = amount 
+            price = amount
         results.append({
             "title": listing.get("title"),
             "description": listing.get("description"),
@@ -537,6 +543,8 @@ def scrape_kijiji():
         "count": len(results),
         "cars": results,
     }
+
+
 @app.get("/fetch-marketplace-primary")
 def fetch_marketplace(
     pages: int = Query(1, ge=1, le=100),
@@ -583,10 +591,12 @@ def fetch_marketplace(
         return FileResponse(file_name, media_type="text/csv", filename=file_name)
 
     return {
-       
+
         "count": len(all_results),
         "results": all_results
     }
+
+
 @app.get("/fetch-marketplace-secondary")
 def fetch_marketplace(
     pages: int = Query(1, ge=1, le=100),
@@ -633,7 +643,7 @@ def fetch_marketplace(
         return FileResponse(file_name, media_type="text/csv", filename=file_name)
 
     return {
-      
+
         "count": len(all_results),
         "results": all_results
     }
@@ -654,19 +664,25 @@ def fetch_marketplace(
 # =============================
 # HEALTH CHECK
 # =============================
+
+
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
+
+
 @app.get("/scrape_new_autotrader_listings")
 async def scrape():
-        try:
-            return await scrape_autotrader_once()
-        except Exception as e:
-            await restart_browser()
-            raise HTTPException(
-                status_code=503,
-                detail=f"Autotrader scrape failed: {str(e)}"
-            )
+    try:
+        return await scrape_autotrader_once()
+    except Exception as e:
+        await restart_browser()
+        raise HTTPException(
+            status_code=503,
+            detail=f"Autotrader scrape failed: {str(e)}"
+        )
+
+
 @app.on_event("shutdown")
 async def shutdown():
     await restart_browser()
