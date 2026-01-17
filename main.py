@@ -4,7 +4,6 @@ from typing import Optional
 import random
 import asyncio
 from pydantic import BaseModel
-
 from fastapi import FastAPI, HTTPException, Query
 import requests
 import json
