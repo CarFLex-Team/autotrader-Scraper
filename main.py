@@ -161,7 +161,7 @@ SWOOPA_ACCOUNTS = {
     "secondary": {
         "url": "https://backend.getswoopa.com/api/marketplace/",
         "headers": {
-            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY5NDI4Mzk0LCJpYXQiOjE3NjkzNDE5OTQsImp0aSI6IjJlZGVkMDEyODkxMjQ2OWM5YmZmN2Q5ZGI5MmEwNmQ0IiwidXNlcl9pZCI6Ijk3OTE3In0.rMDEEmo7Z0hk3LpS8LNkPWp2rGERvIRFqAxm0BzaT98",
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY5NTE1OTg4LCJpYXQiOjE3Njk0Mjk1ODgsImp0aSI6IjdhZWRkNTk2ODA2YzQwMjE5YWFjYjYwNGIxNDQyMTVkIiwidXNlcl9pZCI6Ijk3OTE3In0.9JGqmE5_3jo9nQtIKIieUlMbJIUKNLXZqDjq9f7oaXA",
             "Accept": "*/*",
             "Content-Type": "application/json",
             "Origin": "https://app.getswoopa.com",
