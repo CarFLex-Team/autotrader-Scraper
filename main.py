@@ -56,12 +56,11 @@ COOKIESKIJII = {
 URL = "https://www.autotrader.ca/lst"
 
 NEW_AUT_URL = (
-    # "https://www.autotrader.ca/lst"
-    # "?atype=C&custtype=P&cy=CA&damaged_listing=exclude"
-    # "&desc=1&lat=46.20007&lon=-82.34984"
-    # "&offer=U&size=40&sort=age&ustate=N,U"
-    # "&zip=Spanish,%20ON&zipr=1000"
-    "https://www.autotrader.ca/cars/on/spanish/?rcp=15&rcs=0&srt=9&prx=1000&prv=Ontario&loc=Spanish%2C%20ON&hprc=True&wcp=True&sts=New-Used&adtype=Private&inMarket=advancedSearch"
+    "https://www.autotrader.ca/lst"
+    "?atype=C&custtype=P&cy=CA&damaged_listing=exclude"
+    "&desc=1&lat=46.20007&lon=-82.34984"
+    "&offer=U&size=40&sort=age&ustate=N,U"
+    "&zip=Spanish,%20ON&zipr=1000"
 )
 PARAMS = {
     "atype": "C",
