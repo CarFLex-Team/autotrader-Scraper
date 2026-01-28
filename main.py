@@ -56,11 +56,12 @@ COOKIESKIJII = {
 URL = "https://www.autotrader.ca/lst"
 
 NEW_AUT_URL = (
-    "https://www.autotrader.ca/lst"
-    "?atype=C&custtype=P&cy=CA&damaged_listing=exclude"
-    "&desc=1&lat=46.20007&lon=-82.34984"
-    "&offer=U&size=40&sort=age&ustate=N,U"
-    "&zip=Spanish,%20ON&zipr=1000"
+    # "https://www.autotrader.ca/lst"
+    # "?atype=C&custtype=P&cy=CA&damaged_listing=exclude"
+    # "&desc=1&lat=46.20007&lon=-82.34984"
+    # "&offer=U&size=40&sort=age&ustate=N,U"
+    # "&zip=Spanish,%20ON&zipr=1000"
+    "https://www.autotrader.ca/cars/on/spanish/?rcp=15&rcs=0&srt=9&prx=1000&prv=Ontario&loc=Spanish%2C%20ON&hprc=True&wcp=True&sts=New-Used&adtype=Private&inMarket=advancedSearch"
 )
 PARAMS = {
     "atype": "C",
@@ -149,7 +150,7 @@ SWOOPA_ACCOUNTS = {
         "url": "https://backend.getswoopa.com/api/marketplace/",
         "headers": {
 
-            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY5NjAzOTQ1LCJpYXQiOjE3Njk1MTc1NDYsImp0aSI6IjFjMGNlODBiMjQ5MjRjYzhhYjQ1OThmMDc2NzU0YTI5IiwidXNlcl9pZCI6Ijk1MjE2In0.FiuI7EWGxTMLJyZKfpJUMYj657jseyInmskUQO4q9QQ",
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY5Njg4NjczLCJpYXQiOjE3Njk2MDIyNzMsImp0aSI6IjAxNGZkOTExNDNkOTRlMDJhOTAyZGM2ZTJhYzBlODNlIiwidXNlcl9pZCI6Ijk1MjE2In0.KVay4uAA5l74qUraNz0NN81Gp35_KSpddT8o3_iaALw",
 
             "Accept": "*/*",
             "Content-Type": "application/json",
@@ -161,7 +162,7 @@ SWOOPA_ACCOUNTS = {
     "secondary": {
         "url": "https://backend.getswoopa.com/api/marketplace/",
         "headers": {
-            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY5NjAyNDExLCJpYXQiOjE3Njk1MTYwMTEsImp0aSI6IjBhNTAzNDQxNjRiYzQyYmE5MGQ2ZmFhYWQ5NDFlNTY2IiwidXNlcl9pZCI6Ijk3OTE3In0.cSLLt07UulAj1E6OdnkMbXPbAqw3mH2OTkz80x4Hkr4",
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY5Njg4NjY1LCJpYXQiOjE3Njk2MDIyNjUsImp0aSI6Ijk4OWJmYTgxOWVjNDRlYzRiNmVmMWRjNDYxYjc3MTBkIiwidXNlcl9pZCI6Ijk3OTE3In0.WrE3e6qZAKxwZdzgmw0LXWC76EvB1FrF1N6p8arldqc",
             "Accept": "*/*",
             "Content-Type": "application/json",
             "Origin": "https://app.getswoopa.com",
