@@ -150,7 +150,7 @@ SWOOPA_ACCOUNTS = {
         "headers": {
 
 
-            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzcwMzgwNjE5LCJpYXQiOjE3NzAyOTQyMTksImp0aSI6ImNiMzEzNDIzNzk2MzRkMGNiYTE3ZmRlN2ZhOGVlYzYwIiwidXNlcl9pZCI6Ijk1MjE2In0.HucEK_ZfuUdMS-me3Xz5PWqXEn77TNDjN6W5gDIwxtc",
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzcwNDY2NzA4LCJpYXQiOjE3NzAzODAzMDgsImp0aSI6IjUyMDJlZmUxNWIwZjQyMmRiMDczYjA2MjhlMGUzNGE3IiwidXNlcl9pZCI6Ijk1MjE2In0.84YbWWBZf3F7filXqV3jdgQrSEVtYEBctL7QV5iq3yA",
 
 
             "Accept": "*/*",
