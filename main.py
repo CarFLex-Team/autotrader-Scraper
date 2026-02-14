@@ -1,8 +1,4 @@
-from playwright.async_api import async_playwright, Browser
-from fastapi.concurrency import run_in_threadpool
-from typing import Optional
-import random
-import asyncio
+
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException, Query
 import requests
@@ -25,13 +21,7 @@ class TextInput(BaseModel):
 # =============================
 # CONFIGURATION
 # =============================
-MIN_DELAY = 5     # seconds
-MAX_DELAY = 10    # seconds
-MAX_SCRAPES_PER_BROWSER = 6
-COOLDOWN_ON_BLOCK = 45  # seconds
-_playwright = None
-_browser: Optional[Browser] = None
-_scrape_count = 0
+
 
 
 URLKIJII = "https://www.kijiji.ca/b-cars-trucks/sudbury/c174l1700245"
@@ -55,13 +45,7 @@ COOKIESKIJII = {
 }
 URL = "https://www.autotrader.ca/lst"
 
-NEW_AUT_URL = (
-    "https://www.autotrader.ca/lst"
-    "?atype=C&custtype=P&cy=CA&damaged_listing=exclude"
-    "&desc=1&lat=46.20007&lon=-82.34984"
-    "&offer=U&size=40&sort=age&ustate=N,U"
-    "&zip=Spanish,%20ON&zipr=1000"
-)
+
 PARAMS = {
     "atype": "C",
     "custtype": "P",
@@ -209,131 +193,7 @@ def find_autos_listings(obj, results=None):
             find_autos_listings(item, results)
 
     return results
-# ---------------------------
-# BROWSER LIFECYCLE
-# ---------------------------
 
-
-async def start_browser():
-    global _playwright, _browser, _scrape_count
-
-    if _browser:
-        return
-
-    _playwright = await async_playwright().start()
-    _browser = await _playwright.chromium.launch(
-        headless=True,
-        args=["--disable-blink-features=AutomationControlled"]
-    )
-    _scrape_count = 0
-    print("✅ Browser started")
-
-
-async def restart_browser():
-    global _browser, _playwright, _scrape_count
-
-    try:
-        if _browser:
-            await _browser.close()
-        if _playwright:
-            await _playwright.stop()
-    except Exception:
-        pass
-
-    _browser = None
-    _playwright = None
-    _scrape_count = 0
-    print("🔄 Browser restarted")
-
-
-# ---------------------------
-# CORE SCRAPER
-# ---------------------------
-
-async def scrape_autotrader_once():
-    global _scrape_count
-
-    await start_browser()
-
-    context = await _browser.new_context(
-        locale="en-CA",
-        user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
-        )
-    )
-
-    # Block heavy assets (keep JS)
-    await context.route(
-        "**/*.{png,jpg,jpeg,webp,svg,woff,woff2}",
-        lambda route: asyncio.create_task(route.abort())
-    )
-
-    page = await context.new_page()
-
-    try:
-        await page.goto(
-            NEW_AUT_URL,
-            wait_until="domcontentloaded",
-            timeout=120_000
-        )
-
-        data = await page.evaluate("""
-        () => {
-            const el = document.getElementById('__NEXT_DATA__');
-            return el ? JSON.parse(el.textContent) : null;
-        }
-        """)
-
-        if not data:
-            raise RuntimeError("NEXT_DATA missing (throttled or interstitial)")
-
-        page_props = data["props"]["pageProps"]
-        cars = page_props.get("listings", [])
-        total_results = page_props.get("numberOfResults", 0)
-
-        results = []
-
-        for car in cars:
-            vehicle = car.get("vehicle", {})
-            price_data = car.get("price", {})
-            location = car.get("location", {})
-
-            results.append({
-                "title": f"{vehicle.get('modelYear', '')} {vehicle.get('make', '')} {vehicle.get('model', '')}".strip(),
-                "price": price_data.get("priceFormatted"),
-                "city": location.get("city"),
-                "mileage_km": vehicle.get("mileageInKm"),
-                "image": car["images"][0] if car.get("images") else None,
-                "url": car.get("url"),
-                "description": (car.get("description") or "").split("<br")[0],
-                "make": vehicle.get("make"),
-                "model": vehicle.get("model"),
-                "year": vehicle.get("modelYear"),
-            })
-
-        _scrape_count += 1
-
-        return {
-            "success": True,
-            "total_results": total_results,
-            "scraped_count": len(results),
-            "source": "AutoTrader",
-            "cars": results
-        }
-
-    finally:
-        await context.close()
-
-        # Human-like delay
-        await asyncio.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
-
-        # Restart browser after threshold
-        if _scrape_count >= MAX_SCRAPES_PER_BROWSER:
-            print("⚠️ Scrape limit reached, cooling down…")
-            await restart_browser()
-            await asyncio.sleep(COOLDOWN_ON_BLOCK)
 
 # =============================
 # FASTAPI ENDPOINTS
@@ -350,7 +210,7 @@ def read_root():
             "/fetch-marketplace-primary": "GET -  Scrape primary marketplace listings",
             "/fetch-marketplace-secondary": "GET -  Scrape secondary marketplace listings",
             "/check-scammer": "POST - Check if text indicates a real person or dealer",
-            "/scrape_New_Autotrader": "GET - Scrape New Autotrader listings"
+          
         }
     }
 
@@ -676,18 +536,3 @@ def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
 
 
-@app.get("/scrape_new_autotrader_listings")
-async def scrape():
-    try:
-        return await scrape_autotrader_once()
-    except Exception as e:
-        await restart_browser()
-        raise HTTPException(
-            status_code=503,
-            detail=f"Autotrader scrape failed: {str(e)}"
-        )
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    await restart_browser()
