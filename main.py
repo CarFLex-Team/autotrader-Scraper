@@ -134,7 +134,7 @@ SWOOPA_ACCOUNTS = {
         "headers": {
 
 
-            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzcxNTk4NTcwLCJpYXQiOjE3NzE1MTIxNzAsImp0aSI6ImI3ZWY5OTViZjhmZDQxZWViNTZkOWJlN2NhOWUxMDY4IiwidXNlcl9pZCI6Ijk1MjE2In0.fNd9j209BkcvQsC5YQGnglxqpO1PvWf8SnoybT9DT5w",
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzcxNjg1MTg0LCJpYXQiOjE3NzE1OTg3ODQsImp0aSI6IjA5YjhmOGUyYWZmMjQ0NDI4Njg3NDgwMDQ0YWQ2YTg3IiwidXNlcl9pZCI6Ijk1MjE2In0.R-7MfJEwfg4KDGAADOH8xpDn3zyBX4iDCI45_iaQOXo",
 
 
             "Accept": "*/*",
@@ -148,7 +148,7 @@ SWOOPA_ACCOUNTS = {
         "url": "https://backend.getswoopa.com/api/marketplace/",
         "headers": {
 
-            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzcxNTk4Mzk2LCJpYXQiOjE3NzE1MTE5OTYsImp0aSI6ImI0MmJjN2NhZjhlZDQzZWI4N2I5YzI0OWMxYTZiMTYzIiwidXNlcl9pZCI6Ijk3OTE3In0.F5kSx37aB9MZ9rlY3pmxelWsBPTC5YwlqGz_BceCVxo",
+            "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzcxNjg1MDg2LCJpYXQiOjE3NzE1OTg2ODYsImp0aSI6IjllZDE2YWMyOWM2NTQ0NDg4ZTFjZjljYzc4NDMyNmIyIiwidXNlcl9pZCI6Ijk3OTE3In0.XqSVLdgdCE-rO2nny6k4VAbA4QBiDDYGGRA5k48jU4I",
 
             "Accept": "*/*",
             "Content-Type": "application/json",
