@@ -4,14 +4,14 @@ import requests
 import json
 import re
 import warnings
-from datetime import datetime, timezone
-from fastapi.responses import FileResponse
-import pandas as pd
 import time
-import uuid
+import html as html_lib
+from datetime import datetime, timezone
+
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 warnings.filterwarnings("ignore")
-app = FastAPI(title=" Scraping API")
+app = FastAPI(title="Scraping API")
 
 
 class TextInput(BaseModel):
@@ -36,120 +36,13 @@ PARAMSKIJII = {
 }
 
 HEADERSKIJII = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
     "Accept": "text/html",
 }
 
 COOKIESKIJII = {
     "kjses": "a3ada55c-3dda-4d3b-a2f1-5a2dc3e6d11e",
 }
-
-# ----------dis--------------------
-
-def clean_html_description(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-
-
-def find_longest_description(obj) -> str:
-    """
-    يدور recursively على أي حقل اسمه description أو قريب منه
-    ويرجع أطول نص موجود.
-    """
-    best = ""
-
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            key = str(k).lower()
-
-            if isinstance(v, str) and any(word in key for word in [
-                "description",
-                "comments",
-                "comment",
-                "sellercomment",
-                "overview",
-                "details",
-            ]):
-                cleaned = clean_html_description(v)
-                if len(cleaned) > len(best):
-                    best = cleaned
-
-            candidate = find_longest_description(v)
-            if len(candidate) > len(best):
-                best = candidate
-
-    elif isinstance(obj, list):
-        for item in obj:
-            candidate = find_longest_description(item)
-            if len(candidate) > len(best):
-                best = candidate
-
-    return best
-
-
-def fetch_autotrader_full_description(listing_url: str) -> str:
-    if not listing_url:
-        return ""
-
-    if listing_url.startswith("/"):
-        detail_url = f"https://www.autotrader.ca{listing_url}"
-    else:
-        detail_url = listing_url
-
-    try:
-        resp = requests.get(
-            detail_url,
-            headers=HEADERS,
-            cookies=COOKIES,
-            verify=False,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        html = resp.text
-
-        # جرّب كل script application/json وخد أطول description
-        scripts = re.findall(
-            r'<script[^>]+type="application/json"[^>]*>(.*?)</script>',
-            html,
-            re.DOTALL,
-        )
-
-        best = ""
-        for block in scripts:
-            try:
-                block_json = json.loads(block.replace("&quot;", '"'))
-            except Exception:
-                continue
-
-            candidate = find_longest_description(block_json)
-            if len(candidate) > len(best):
-                best = candidate
-
-        if best:
-            return best
-
-        # fallback: لو الوصف موجود كنص داخل الصفحة
-        m = re.search(
-            r'"description"\s*:\s*"((?:\\.|[^"\\])*)"',
-            html,
-            re.DOTALL,
-        )
-        if m:
-            raw = m.group(1)
-            raw = raw.encode("utf-8").decode("unicode_escape")
-            raw = raw.replace("\\/", "/")
-            return clean_html_description(raw)
-
-    except requests.RequestException:
-        return ""
-
-    return ""
 
 # ---------- AutoTrader ----------
 
@@ -198,7 +91,6 @@ HEADERS = {
 
 COOKIES = {
     "as24Visitor": "c3c760d9-0878-408d-a19b-2180d1931375",
-    
 }
 
 # ---------- Swoopa ----------
@@ -214,7 +106,7 @@ SWOOPA_ACCOUNTS = {
             "Origin": "https://app.getswoopa.com",
             "Referer": "https://app.getswoopa.com/",
             "User-Agent": "Mozilla/5.0",
-        }
+        },
     },
     "secondary": {
         "url": "https://backend.getswoopa.com/api/marketplace/",
@@ -226,13 +118,27 @@ SWOOPA_ACCOUNTS = {
             "Origin": "https://app.getswoopa.com",
             "Referer": "https://app.getswoopa.com/",
             "User-Agent": "Mozilla/5.0",
-        }
-    }
+        },
+    },
 }
+
 
 # =============================
 # HELPER FUNCTIONS
 # =============================
+
+def clean_html_description(text: str) -> str:
+    if not text:
+        return ""
+
+    text = html_lib.unescape(text)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\r\n?", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
 
 def parse_kijiji_date(date_str):
     """Parse Kijiji ISO-ish timestamps into timezone-aware datetime."""
@@ -250,8 +156,7 @@ def parse_kijiji_date(date_str):
 
 def fetch_swoopa_listing_info(listing_id: str, account_config: dict) -> dict | None:
     """
-    يجيب JSON تفاصيل إعلان واحد من Swoopa (info endpoint).
-    ويطبع شوية حاجات في الترمنال عشان نعرف المشكلة فين.
+    Get JSON details for one Swoopa listing.
     """
     detail_template = account_config.get("detail_url_template")
     if not detail_template:
@@ -271,8 +176,10 @@ def fetch_swoopa_listing_info(listing_id: str, account_config: dict) -> dict | N
 
         data = resp.json()
         print("   KEYS:", list(data.keys()))
-        print("   listing_description preview:",
-              (data.get("listing_description") or "")[:80])
+        print(
+            "   listing_description preview:",
+            (data.get("listing_description") or "")[:80],
+        )
         return data
 
     except requests.RequestException as e:
@@ -299,6 +206,52 @@ def find_autos_listings(obj, results=None):
     return results
 
 
+def build_autotrader_detail_url(listing_url: str) -> str:
+    if not listing_url:
+        return ""
+    if listing_url.startswith("/"):
+        return f"https://www.autotrader.ca{listing_url}"
+    return listing_url
+
+
+def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
+    """
+    Open Autotrader detail page and fetch full description using Playwright.
+    """
+    detail_url = build_autotrader_detail_url(listing_url)
+    if not detail_url:
+        return ""
+
+    try:
+        page.goto(detail_url, wait_until="domcontentloaded", timeout=60000)
+
+        selectors = [
+            "div.SellerNotesSection_content__te2EB",
+            "div[class*='SellerNotesSection_content__']",
+        ]
+
+        for selector in selectors:
+            try:
+                page.wait_for_selector(selector, timeout=15000)
+                locator = page.locator(selector).first
+
+                if locator.count() > 0:
+                    raw_html = locator.inner_html()
+                    cleaned = clean_html_description(raw_html)
+                    if cleaned:
+                        return cleaned
+            except PlaywrightTimeoutError:
+                continue
+            except Exception:
+                continue
+
+        return ""
+
+    except Exception as e:
+        print(f"[AUTOTRADER DESCRIPTION ERROR] {detail_url} -> {e}")
+        return ""
+
+
 # =============================
 # FASTAPI ENDPOINTS
 # =============================
@@ -309,10 +262,10 @@ def read_root():
         "message": "Scraping API",
         "endpoints": {
             "/scrape_autotrader": "GET - Scrape Autotrader listings",
-            "/scrape_kijiji": "GET -  Scrape Kijiji listings",
-            "/fetch-marketplace-primary": "GET -  Scrape primary marketplace listings",
-            "/fetch-marketplace-secondary": "GET -  Scrape secondary marketplace listings",
-            "/check-scammer": "POST - Check if text indicates a real person or dealer",
+            "/scrape_kijiji": "GET - Scrape Kijiji listings",
+            "/fetch-marketplace-primary": "GET - Scrape primary marketplace listings",
+            "/fetch-marketplace-secondary": "GET - Scrape secondary marketplace listings",
+            "/health": "GET - Health check",
         },
     }
 
@@ -323,6 +276,7 @@ def read_root():
 def scrape_autotrader():
     """
     Scrape Autotrader listings and return structured data.
+    Full description is fetched from detail page using Playwright.
     """
     try:
         response = requests.get(
@@ -341,7 +295,7 @@ def scrape_autotrader():
             )
 
         html = response.text
-        # Parse embedded JSON
+
         match = re.search(
             r'<script[^>]+type="application/json"[^>]*>(.*?)</script>',
             html,
@@ -357,51 +311,64 @@ def scrape_autotrader():
         json_text = match.group(1).replace("&quot;", '"')
         data = json.loads(json_text)
 
-        # Extract data
         page_props = data["props"]["pageProps"]
         number_of_results = page_props["numberOfResults"]
         cars = page_props["listings"]
 
         results = []
 
-        for car in cars:
-            vehicle = car.get("vehicle", {})
-            price_data = car.get("price", {})
-            location = car.get("location", {})
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent=HEADERS["User-Agent"],
+                ignore_https_errors=True,
+            )
+            page = context.new_page()
 
-            make = vehicle.get("make", "")
-            model = vehicle.get("model", "")
-            year = vehicle.get("modelYear", "")
-            mileage = vehicle.get("mileageInKm")
+            for car in cars:
+                vehicle = car.get("vehicle", {})
+                price_data = car.get("price", {})
+                location = car.get("location", {})
 
-            price = price_data.get("priceFormatted", "")
-            city = location.get("city", "")
-            url = car.get("url", "")
+                make = vehicle.get("make", "")
+                model = vehicle.get("model", "")
+                year = vehicle.get("modelYear", "")
+                mileage = vehicle.get("mileageInKm")
 
-            image = car["images"][0] if car.get("images") else None
+                price = price_data.get("priceFormatted", "")
+                city = location.get("city", "")
+                url = car.get("url", "")
 
-            description = fetch_autotrader_full_description(url)
+                image = car["images"][0] if car.get("images") else None
 
-            if not description:
-                raw_description = car.get("description", "") or ""
-                description = clean_html_description(raw_description)
+                description = fetch_autotrader_full_description_playwright(page, url)
+                description_source = "detail_page_playwright"
 
-            title = f"{year} {make} {model}".strip()
+                if not description:
+                    raw_description = car.get("description", "") or ""
+                    description = clean_html_description(raw_description)
+                    description_source = "search_results_snippet"
 
-            car_data = {
-                "title": title,
-                "price": price,
-                "city": city,
-                "mileage_km": mileage,
-                "image": image,
-                "url": url,
-                "description": description,
-                "make": make,
-                "model": model,
-                "year": year,
-            }
+                title = f"{year} {make} {model}".strip()
 
-            results.append(car_data)
+                car_data = {
+                    "title": title,
+                    "price": price,
+                    "city": city,
+                    "mileage_km": mileage,
+                    "image": image,
+                    "url": url,
+                    "description": description,
+                    "description_source": description_source,
+                    "make": make,
+                    "model": model,
+                    "year": year,
+                }
+
+                results.append(car_data)
+
+            context.close()
+            browser.close()
 
         return {
             "success": True,
@@ -492,7 +459,7 @@ def scrape_kijiji():
         results.append(
             {
                 "title": listing.get("title"),
-                "description": (listing.get("description") or "").strip(),
+                "description": clean_html_description(listing.get("description") or ""),
                 "price": price,
                 "currency": "CAD",
                 "url": listing.get("url"),
@@ -522,7 +489,7 @@ def scrape_kijiji():
     }
 
 
-# ---------- Swoopa: primary & secondary ----------
+# ---------- Swoopa: primary ----------
 
 @app.get("/fetch-marketplace-primary")
 def fetch_marketplace_primary(
@@ -531,8 +498,7 @@ def fetch_marketplace_primary(
     with_description: bool = True,
 ):
     """
-    يجيب listings من Swoopa لحساب primary
-    + يضيف listing_description من info/<id> لو with_description=True
+    Fetch Swoopa listings for primary account.
     """
     if account not in SWOOPA_ACCOUNTS:
         raise HTTPException(status_code=400, detail="Invalid Swoopa account")
@@ -543,7 +509,6 @@ def fetch_marketplace_primary(
 
     all_results = []
 
-    # 1) جلب صفحات الـ listings
     for _ in range(pages):
         try:
             r = requests.get(url, headers=headers, timeout=20)
@@ -570,7 +535,6 @@ def fetch_marketplace_primary(
 
         time.sleep(1)
 
-    
     if with_description:
         enriched = []
         for item in all_results:
@@ -580,7 +544,6 @@ def fetch_marketplace_primary(
             if listing_id:
                 info_data = fetch_swoopa_listing_info(listing_id, swoopa)
                 if info_data:
-                    # من الـ screenshot واضح إن اسم الفيلد هو "listing_description"
                     desc = info_data.get("listing_description")
 
             item["listing_description"] = desc
@@ -594,6 +557,8 @@ def fetch_marketplace_primary(
     }
 
 
+# ---------- Swoopa: secondary ----------
+
 @app.get("/fetch-marketplace-secondary")
 def fetch_marketplace_secondary(
     pages: int = Query(1, ge=1, le=100),
@@ -601,7 +566,7 @@ def fetch_marketplace_secondary(
     with_description: bool = True,
 ):
     """
-    نفس فكرة primary لكن على حساب secondary.
+    Fetch Swoopa listings for secondary account.
     """
     if account not in SWOOPA_ACCOUNTS:
         raise HTTPException(status_code=400, detail="Invalid Swoopa account")
@@ -612,7 +577,6 @@ def fetch_marketplace_secondary(
 
     all_results = []
 
-    # 1) جلب صفحات الـ listings
     for _ in range(pages):
         try:
             r = requests.get(url, headers=headers, timeout=20)
@@ -639,7 +603,6 @@ def fetch_marketplace_secondary(
 
         time.sleep(1)
 
-    # 2) إضافة listing_description من info/<id>
     if with_description:
         enriched = []
         for item in all_results:
@@ -667,3 +630,7 @@ def fetch_marketplace_secondary(
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
+
+
+# Optional local run:
+# uvicorn this_file_name:app --reload --port 9000
