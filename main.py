@@ -134,7 +134,6 @@ SWOOPA_ACCOUNTS = {
 def clean_html_description(text: str) -> str:
     if not text:
         return ""
-
     text = html_lib.unescape(text)
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
@@ -203,6 +202,23 @@ def find_autos_listings(obj, results=None):
     return results
 
 
+def add_cookies_to_context(context, cookies_dict: dict, domain: str):
+    cookies_to_add = []
+    for name, value in cookies_dict.items():
+        if value:
+            cookies_to_add.append(
+                {
+                    "name": name,
+                    "value": value,
+                    "domain": domain,
+                    "path": "/",
+                    "secure": True,
+                }
+            )
+    if cookies_to_add:
+        context.add_cookies(cookies_to_add)
+
+
 def build_autotrader_detail_url(listing_url: str) -> str:
     if not listing_url:
         return ""
@@ -211,33 +227,35 @@ def build_autotrader_detail_url(listing_url: str) -> str:
     return listing_url
 
 
+def build_kijiji_detail_url(listing_url: str) -> str:
+    if not listing_url:
+        return ""
+    if listing_url.startswith("/"):
+        return f"https://www.kijiji.ca{listing_url}"
+    return listing_url
+
+
 def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
     """
-    يدخل صفحة الإعلان ثم يقرأ الـ seller notes بالكامل.
-    يحاول الضغط على See more / Voir plus إن وجدت.
+    يدخل صفحة الإعلان ثم يقرأ seller notes بالكامل.
     """
     detail_url = build_autotrader_detail_url(listing_url)
     if not detail_url:
         return ""
 
     try:
-        page.goto(detail_url, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(1200)
+        page.goto(detail_url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(2000)
 
-        try:
-            page.wait_for_selector(
-                "#sellerNotesSection, div[class*='SellerNotesSection_content__']",
-                timeout=20000,
-            )
-        except PlaywrightTimeoutError:
-            return ""
-
-        # لو زر See more موجود داخل seller notes
         expand_selectors = [
             "#sellerNotesSection button[aria-label*='See more']",
             "#sellerNotesSection button[aria-label*='Voir plus']",
             "#sellerNotesSection button:has-text('See more')",
             "#sellerNotesSection button:has-text('Voir plus')",
+            "button[aria-label*='See more']",
+            "button[aria-label*='Voir plus']",
+            "button:has-text('See more')",
+            "button:has-text('Voir plus')",
         ]
 
         for selector in expand_selectors:
@@ -246,46 +264,293 @@ def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
                 if btn.count() > 0 and btn.is_visible():
                     btn.scroll_into_view_if_needed()
                     btn.click(timeout=3000)
-                    page.wait_for_timeout(1000)
+                    page.wait_for_timeout(1200)
                     break
             except Exception:
                 pass
 
-        content = page.locator(
-            "#sellerNotesSection div[class*='SellerNotesSection_content__']"
-        ).first
+        text = page.evaluate(
+            """
+            () => {
+                const clean = (s) => {
+                    if (!s) return "";
+                    return s
+                        .replace(/\\u00A0/g, " ")
+                        .replace(/\\r/g, "")
+                        .replace(/[ \\t]+\\n/g, "\\n")
+                        .replace(/\\n{3,}/g, "\\n\\n")
+                        .trim();
+                };
 
-        if content.count() == 0:
-            content = page.locator("div[class*='SellerNotesSection_content__']").first
+                const seller = document.querySelector(
+                    '#sellerNotesSection div[class*="SellerNotesSection_content__"], div[class*="SellerNotesSection_content__"]'
+                );
 
-        if content.count() == 0:
+                if (seller) {
+                    const raw = seller.textContent || seller.innerText || "";
+                    const out = clean(raw);
+                    if (out) return out;
+                }
+
+                const all = Array.from(document.querySelectorAll("body *"));
+                const label = all.find(el =>
+                    /^(Vehicle Description|Description du véhicule)$/i.test(
+                        (el.textContent || "").trim()
+                    )
+                );
+
+                if (label) {
+                    let node = label;
+                    for (let i = 0; i < 7 && node; i++, node = node.parentElement) {
+                        const raw = node.innerText || node.textContent || "";
+                        const txt = clean(raw);
+
+                        if (!txt) continue;
+
+                        if (
+                            /Vehicle Description|Description du véhicule/i.test(txt) &&
+                            txt.length > 40
+                        ) {
+                            let lines = txt
+                                .split("\\n")
+                                .map(x => x.trim())
+                                .filter(Boolean);
+
+                            lines = lines.filter(x =>
+                                !/^(Vehicle Description|Description du véhicule|See more|See less|Voir plus|Voir moins)$/i.test(x)
+                            );
+
+                            return clean(lines.join("\\n"));
+                        }
+                    }
+                }
+
+                return "";
+            }
+            """
+        )
+
+        text = normalize_plain_text(text)
+        if len(text) < 30:
             return ""
-
-        plain_text = ""
-        html_text = ""
-
-        try:
-            plain_text = normalize_plain_text(content.inner_text(timeout=5000))
-        except Exception:
-            pass
-
-        try:
-            raw_html = content.inner_html(timeout=5000)
-            html_text = clean_html_description(raw_html)
-        except Exception:
-            pass
-
-        best = plain_text if len(plain_text) >= len(html_text) else html_text
-        best = best.strip()
-
-        # اعتبر الوصف غير مفيد لو قصير جدًا
-        if len(best) < 20:
-            return ""
-
-        return best
+        return text
 
     except Exception as e:
         print(f"[AUTOTRADER DESCRIPTION ERROR] {detail_url} -> {e}")
+        return ""
+
+
+def extract_longest_description_from_obj(obj) -> str:
+    best = ""
+
+    def walk(x):
+        nonlocal best
+
+        if isinstance(x, dict):
+            for k, v in x.items():
+                key = str(k).lower()
+
+                if isinstance(v, str) and any(word in key for word in [
+                    "description",
+                    "body",
+                    "adcopy",
+                    "sellerdescription",
+                    "seller_description",
+                    "comments",
+                    "content",
+                    "text",
+                ]):
+                    cleaned = normalize_plain_text(v)
+                    if len(cleaned) > len(best):
+                        best = cleaned
+
+                walk(v)
+
+        elif isinstance(x, list):
+            for item in x:
+                walk(item)
+
+    walk(obj)
+    return best.strip()
+
+
+def fetch_kijiji_full_description_playwright(page, listing_url: str) -> str:
+    """
+    يدخل صفحة إعلان Kijiji ويحاول استخراج الوصف الكامل من:
+    1) JSON-LD / scripts
+    2) عناصر DOM التي تحتوي الوصف
+    3) section حول عنوان Description
+    """
+    detail_url = build_kijiji_detail_url(listing_url)
+    if not detail_url:
+        return ""
+
+    try:
+        page.goto(detail_url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(2000)
+
+        expand_selectors = [
+            "button:has-text('See more')",
+            "button:has-text('Read more')",
+            "button:has-text('Show more')",
+            "button:has-text('Voir plus')",
+            "[role='button']:has-text('See more')",
+            "[role='button']:has-text('Read more')",
+            "[role='button']:has-text('Voir plus')",
+        ]
+
+        for selector in expand_selectors:
+            try:
+                btn = page.locator(selector).first
+                if btn.count() > 0 and btn.is_visible():
+                    btn.scroll_into_view_if_needed()
+                    btn.click(timeout=3000)
+                    page.wait_for_timeout(1200)
+                    break
+            except Exception:
+                pass
+
+        text = page.evaluate(
+            """
+            () => {
+                const clean = (s) => {
+                    if (!s) return "";
+                    return s
+                        .replace(/\\u00A0/g, " ")
+                        .replace(/\\r/g, "")
+                        .replace(/[ \\t]+\\n/g, "\\n")
+                        .replace(/\\n{3,}/g, "\\n\\n")
+                        .trim();
+                };
+
+                const parseJsonSafely = (txt) => {
+                    try { return JSON.parse(txt); } catch { return null; }
+                };
+
+                const extractLongestDescription = (obj) => {
+                    let best = "";
+
+                    const walk = (x) => {
+                        if (!x) return;
+
+                        if (Array.isArray(x)) {
+                            for (const item of x) walk(item);
+                            return;
+                        }
+
+                        if (typeof x === "object") {
+                            for (const [k, v] of Object.entries(x)) {
+                                const key = String(k).toLowerCase();
+
+                                if (
+                                    typeof v === "string" &&
+                                    /(description|body|adcopy|sellerdescription|seller_description|comments|content|text)/i.test(key)
+                                ) {
+                                    const c = clean(v);
+                                    if (c.length > best.length) best = c;
+                                }
+
+                                walk(v);
+                            }
+                        }
+                    };
+
+                    walk(obj);
+                    return best.trim();
+                };
+
+                // 1) JSON-LD / scripts
+                const scriptNodes = Array.from(document.querySelectorAll(
+                    'script[type="application/ld+json"], script[type="application/json"]'
+                ));
+
+                let bestScriptDesc = "";
+
+                for (const node of scriptNodes) {
+                    const raw = (node.textContent || "").trim();
+                    if (!raw) continue;
+
+                    const parsed = parseJsonSafely(raw);
+                    if (!parsed) continue;
+
+                    const found = extractLongestDescription(parsed);
+                    if (found.length > bestScriptDesc.length) {
+                        bestScriptDesc = found;
+                    }
+                }
+
+                if (bestScriptDesc.length > 40) return bestScriptDesc;
+
+                // 2) عناصر مباشرة مرشحة للوصف
+                const selectors = [
+                    '[data-testid*="description"]',
+                    '[class*="description"]',
+                    '[id*="description"]',
+                    'section [class*="description"]',
+                    'section [data-testid*="description"]',
+                    'div [class*="description"]',
+                ];
+
+                let bestDomDesc = "";
+
+                for (const selector of selectors) {
+                    const nodes = Array.from(document.querySelectorAll(selector));
+                    for (const node of nodes) {
+                        const txt = clean(node.innerText || node.textContent || "");
+                        if (!txt) continue;
+
+                        // تجاهل النصوص القصيرة أو العناوين فقط
+                        if (txt.length < 40) continue;
+                        if (/^(description|description du véhicule)$/i.test(txt)) continue;
+
+                        if (txt.length > bestDomDesc.length) {
+                            bestDomDesc = txt;
+                        }
+                    }
+                }
+
+                if (bestDomDesc.length > 40) return bestDomDesc;
+
+                // 3) ابحث عن عنوان Description وخذ أقرب container غني بالنص
+                const all = Array.from(document.querySelectorAll("body *"));
+                const label = all.find(el =>
+                    /^(description|item description|description du véhicule)$/i.test(
+                        (el.textContent || "").trim()
+                    )
+                );
+
+                if (label) {
+                    let node = label;
+                    for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
+                        const raw = clean(node.innerText || node.textContent || "");
+                        if (!raw || raw.length < 40) continue;
+
+                        let lines = raw
+                            .split("\\n")
+                            .map(x => x.trim())
+                            .filter(Boolean);
+
+                        lines = lines.filter(x =>
+                            !/^(description|item description|description du véhicule|see more|read more|show more|voir plus)$/i.test(x)
+                        );
+
+                        const finalText = clean(lines.join("\\n"));
+                        if (finalText.length > 40) return finalText;
+                    }
+                }
+
+                return "";
+            }
+            """
+        )
+
+        text = normalize_plain_text(text)
+        if len(text) < 30:
+            return ""
+        return text
+
+    except Exception as e:
+        print(f"[KIJIJI DESCRIPTION ERROR] {detail_url} -> {e}")
         return ""
 
 
@@ -368,9 +633,8 @@ def read_root():
 @app.get("/scrape_autotrader")
 def scrape_autotrader():
     """
-    يجيب نتائج AutoTrader.
-    يدخل صفحة كل إعلان أولًا لسحب الوصف الكامل،
-    ثم بعد ذلك فقط يبني car_data.
+    يدخل صفحة كل إعلان AutoTrader أولًا، يسحب الوصف الكامل،
+    وبعدها فقط يبني car_data.
     """
     try:
         response = requests.get(
@@ -416,8 +680,12 @@ def scrape_autotrader():
             context = browser.new_context(
                 user_agent=HEADERS["User-Agent"],
                 ignore_https_errors=True,
+                locale="en-CA",
             )
+            add_cookies_to_context(context, COOKIES, ".autotrader.ca")
+
             page = context.new_page()
+            page.set_default_timeout(20000)
 
             for car in cars:
                 vehicle = car.get("vehicle", {})
@@ -434,17 +702,14 @@ def scrape_autotrader():
                 url = car.get("url", "")
                 image = car["images"][0] if car.get("images") else None
 
-                # 1) ادخل على اللينك الأول واسحب الوصف
                 description = fetch_autotrader_full_description_playwright(page, url)
                 description_source = "detail_page_playwright"
 
-                # 2) fallback لو فشل فقط
                 if not description:
                     raw_description = car.get("description", "") or ""
                     description = clean_html_description(raw_description)
                     description_source = "search_results_snippet"
 
-                # 3) بعد ما الوصف يخلص، ابنِ car details
                 title = f"{year} {make} {model}".strip()
 
                 car_data = {
@@ -497,6 +762,10 @@ def scrape_autotrader():
 
 @app.get("/scrape_kijiji")
 def scrape_kijiji():
+    """
+    يدخل صفحة كل إعلان Kijiji أولًا، يسحب الوصف الكامل،
+    وبعدها فقط يبني car_data.
+    """
     try:
         r = requests.get(
             URLKIJII,
@@ -526,53 +795,76 @@ def scrape_kijiji():
         )
 
         data = json.loads(raw_json)
-
         listings_map = find_autos_listings(data)
         now = datetime.now(timezone.utc)
 
         results = []
 
-        for listing in listings_map.values():
-            attributes = listing.get("attributes", {}).get("all", [])
-
-            def get_attr(name):
-                for a in attributes:
-                    if a.get("canonicalName") == name:
-                        vals = a.get("canonicalValues")
-                        return vals[0] if vals else None
-                return None
-
-            activation = parse_kijiji_date(listing.get("activationDate"))
-            sorting = parse_kijiji_date(listing.get("sortingDate"))
-            amount = listing.get("price", {}).get("amount")
-
-            if isinstance(amount, (int, float)):
-                price = amount // 100
-            else:
-                price = amount
-
-            results.append(
-                {
-                    "title": listing.get("title"),
-                    "description": clean_html_description(listing.get("description") or ""),
-                    "price": price,
-                    "currency": "CAD",
-                    "url": listing.get("url"),
-                    "images": listing.get("imageUrls") or [],
-                    "brand": get_attr("carmake"),
-                    "model": get_attr("carmodel"),
-                    "year": get_attr("caryear"),
-                    "mileage_km": get_attr("carmileageinkms"),
-                    "body_type": get_attr("carbodytype"),
-                    "color": get_attr("carcolor"),
-                    "doors": get_attr("noofdoors"),
-                    "fuel_type": get_attr("carfueltype"),
-                    "transmission": get_attr("cartransmission"),
-                    "activation_date": activation.isoformat() if activation else None,
-                    "sorting_date": sorting.isoformat() if sorting else None,
-                    "time_since_activation": str(now - activation) if activation else None,
-                }
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent=HEADERSKIJII["User-Agent"],
+                ignore_https_errors=True,
+                locale="en-CA",
             )
+            add_cookies_to_context(context, COOKIESKIJII, ".kijiji.ca")
+
+            page = context.new_page()
+            page.set_default_timeout(20000)
+
+            for listing in listings_map.values():
+                attributes = listing.get("attributes", {}).get("all", [])
+
+                def get_attr(name):
+                    for a in attributes:
+                        if a.get("canonicalName") == name:
+                            vals = a.get("canonicalValues")
+                            return vals[0] if vals else None
+                    return None
+
+                activation = parse_kijiji_date(listing.get("activationDate"))
+                sorting = parse_kijiji_date(listing.get("sortingDate"))
+                amount = listing.get("price", {}).get("amount")
+
+                if isinstance(amount, (int, float)):
+                    price = amount // 100
+                else:
+                    price = amount
+
+                listing_url = listing.get("url", "")
+                description = fetch_kijiji_full_description_playwright(page, listing_url)
+                description_source = "detail_page_playwright"
+
+                if not description:
+                    description = clean_html_description(listing.get("description") or "")
+                    description_source = "listing_json_snippet"
+
+                results.append(
+                    {
+                        "title": listing.get("title"),
+                        "description": description,
+                        "description_source": description_source,
+                        "price": price,
+                        "currency": "CAD",
+                        "url": listing_url,
+                        "images": listing.get("imageUrls") or [],
+                        "brand": get_attr("carmake"),
+                        "model": get_attr("carmodel"),
+                        "year": get_attr("caryear"),
+                        "mileage_km": get_attr("carmileageinkms"),
+                        "body_type": get_attr("carbodytype"),
+                        "color": get_attr("carcolor"),
+                        "doors": get_attr("noofdoors"),
+                        "fuel_type": get_attr("carfueltype"),
+                        "transmission": get_attr("cartransmission"),
+                        "activation_date": activation.isoformat() if activation else None,
+                        "sorting_date": sorting.isoformat() if sorting else None,
+                        "time_since_activation": str(now - activation) if activation else None,
+                    }
+                )
+
+            context.close()
+            browser.close()
 
         results.sort(key=lambda x: x["sorting_date"] or "", reverse=True)
 
@@ -614,5 +906,3 @@ def fetch_marketplace_secondary(
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
-
-
