@@ -91,7 +91,7 @@ HEADERS = {
 
 COOKIES = {
     "as24Visitor": "c3c760d9-0878-408d-a19b-2180d1931375",
-    # لو حابب حط هنا باقي الـ cookies اللي أخدتهم من المتصفح
+    
 }
 
 # ---------- Swoopa ----------
@@ -272,11 +272,10 @@ def scrape_autotrader():
             url = car.get("url", "")
 
             image = car["images"][0] if car.get("images") else None
-            description = (
-                car.get("description", "").split("<br")[0]
-                if car.get("description")
-                else ""
-            )
+
+            raw_description = car.get("description", "") or ""
+            description = re.sub(r"<br\s*/?>", "\n", raw_description)
+            description = re.sub(r"<[^>]+>", "", description).strip()
 
             title = f"{year} {make} {model}".strip()
 
@@ -384,7 +383,7 @@ def scrape_kijiji():
         results.append(
             {
                 "title": listing.get("title"),
-                "description": listing.get("description"),
+                "description": (listing.get("description") or "").strip(),
                 "price": price,
                 "currency": "CAD",
                 "url": listing.get("url"),
@@ -462,7 +461,7 @@ def fetch_marketplace_primary(
 
         time.sleep(1)
 
-    # 2) جلب listing_description لكل إعلان من info/<id> وإضافته
+    
     if with_description:
         enriched = []
         for item in all_results:
