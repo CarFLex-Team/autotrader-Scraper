@@ -8,7 +8,7 @@ import time
 import html as html_lib
 from datetime import datetime, timezone
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 
 warnings.filterwarnings("ignore")
 app = FastAPI(title="Scraping API")
@@ -130,7 +130,6 @@ SWOOPA_ACCOUNTS = {
 def clean_html_description(text: str) -> str:
     if not text:
         return ""
-
     text = html_lib.unescape(text)
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
@@ -138,6 +137,102 @@ def clean_html_description(text: str) -> str:
     text = re.sub(r"\r\n?", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
+    if not listing_url:
+        return ""
+
+    detail_url = (
+        f"https://www.autotrader.ca{listing_url}"
+        if listing_url.startswith("/")
+        else listing_url
+    )
+
+    try:
+        page.goto(detail_url, wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(1200)
+
+        # -----------------------------
+        # Case 1: direct seller notes block
+        # -----------------------------
+        try:
+            seller_notes = page.locator("div[class*='SellerNotesSection_content__']").first
+            if seller_notes.count() > 0:
+                txt = seller_notes.inner_text().strip()
+                if txt:
+                    return txt
+        except Exception:
+            pass
+
+        # -----------------------------
+        # Case 2: generic "Vehicle Description" row
+        # -----------------------------
+        label = page.get_by_text(
+            re.compile(r"^\s*(Vehicle Description|Description du véhicule)\s*$", re.I)
+        ).first
+
+        if label.count() == 0:
+            return ""
+
+        row = None
+
+        candidate_xpaths = [
+            "xpath=ancestor::section[1]",
+            "xpath=ancestor::article[1]",
+            "xpath=ancestor::li[1]",
+            "xpath=ancestor::div[2]",
+            "xpath=ancestor::div[3]",
+            "xpath=ancestor::div[4]",
+        ]
+
+        for xp in candidate_xpaths:
+            try:
+                candidate = label.locator(xp).first
+                if candidate.count() == 0:
+                    continue
+
+                txt = candidate.inner_text(timeout=3000).strip()
+                if (
+                    "Vehicle Description" in txt
+                    or "Description du véhicule" in txt
+                ) and len(txt.splitlines()) >= 2:
+                    row = candidate
+                    break
+            except Exception:
+                continue
+
+        if row is None:
+            return ""
+
+        # click only the See more inside the description row if it exists
+        try:
+            see_more = row.get_by_text(re.compile(r"^\s*(See more|Voir plus)\s*$", re.I)).first
+            if see_more.count() > 0 and see_more.is_visible():
+                see_more.scroll_into_view_if_needed()
+                see_more.click(timeout=3000)
+                page.wait_for_timeout(800)
+        except Exception:
+            pass
+
+        raw_text = row.inner_text().strip()
+
+        lines = []
+        for line in raw_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if re.fullmatch(r"(Vehicle Description|Description du véhicule)", line, re.I):
+                continue
+            if re.fullmatch(r"(See more|Voir plus)", line, re.I):
+                continue
+            lines.append(line)
+
+        return "\n".join(lines).strip()
+
+    except Exception as e:
+        print(f"[AUTOTRADER DESCRIPTION ERROR] {detail_url} -> {e}")
+        return ""
 
 
 def parse_kijiji_date(date_str):
