@@ -8,7 +8,7 @@ import time
 import html as html_lib
 from datetime import datetime, timezone
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 warnings.filterwarnings("ignore")
 app = FastAPI(title="Scraping API")
@@ -36,11 +36,16 @@ PARAMSKIJII = {
 }
 
 HEADERSKIJII = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/142.0.0.0 Safari/537.36"
+    ),
     "Accept": "text/html",
 }
 
 COOKIESKIJII = {
+    
     "kjses": "a3ada55c-3dda-4d3b-a2f1-5a2dc3e6d11e",
 }
 
@@ -90,6 +95,7 @@ HEADERS = {
 }
 
 COOKIES = {
+
     "as24Visitor": "c3c760d9-0878-408d-a19b-2180d1931375",
 }
 
@@ -124,12 +130,13 @@ SWOOPA_ACCOUNTS = {
 
 
 # =============================
-# HELPER FUNCTIONS
+# HELPERS
 # =============================
 
 def clean_html_description(text: str) -> str:
     if not text:
         return ""
+
     text = html_lib.unescape(text)
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
@@ -139,104 +146,16 @@ def clean_html_description(text: str) -> str:
     return text.strip()
 
 
-def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
-    if not listing_url:
+def normalize_plain_text(text: str) -> str:
+    if not text:
         return ""
-
-    detail_url = (
-        f"https://www.autotrader.ca{listing_url}"
-        if listing_url.startswith("/")
-        else listing_url
-    )
-
-    try:
-        page.goto(detail_url, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(1200)
-
-        # -----------------------------
-        # Case 1: direct seller notes block
-        # -----------------------------
-        try:
-            seller_notes = page.locator("div[class*='SellerNotesSection_content__']").first
-            if seller_notes.count() > 0:
-                txt = seller_notes.inner_text().strip()
-                if txt:
-                    return txt
-        except Exception:
-            pass
-
-        # -----------------------------
-        # Case 2: generic "Vehicle Description" row
-        # -----------------------------
-        label = page.get_by_text(
-            re.compile(r"^\s*(Vehicle Description|Description du véhicule)\s*$", re.I)
-        ).first
-
-        if label.count() == 0:
-            return ""
-
-        row = None
-
-        candidate_xpaths = [
-            "xpath=ancestor::section[1]",
-            "xpath=ancestor::article[1]",
-            "xpath=ancestor::li[1]",
-            "xpath=ancestor::div[2]",
-            "xpath=ancestor::div[3]",
-            "xpath=ancestor::div[4]",
-        ]
-
-        for xp in candidate_xpaths:
-            try:
-                candidate = label.locator(xp).first
-                if candidate.count() == 0:
-                    continue
-
-                txt = candidate.inner_text(timeout=3000).strip()
-                if (
-                    "Vehicle Description" in txt
-                    or "Description du véhicule" in txt
-                ) and len(txt.splitlines()) >= 2:
-                    row = candidate
-                    break
-            except Exception:
-                continue
-
-        if row is None:
-            return ""
-
-        # click only the See more inside the description row if it exists
-        try:
-            see_more = row.get_by_text(re.compile(r"^\s*(See more|Voir plus)\s*$", re.I)).first
-            if see_more.count() > 0 and see_more.is_visible():
-                see_more.scroll_into_view_if_needed()
-                see_more.click(timeout=3000)
-                page.wait_for_timeout(800)
-        except Exception:
-            pass
-
-        raw_text = row.inner_text().strip()
-
-        lines = []
-        for line in raw_text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if re.fullmatch(r"(Vehicle Description|Description du véhicule)", line, re.I):
-                continue
-            if re.fullmatch(r"(See more|Voir plus)", line, re.I):
-                continue
-            lines.append(line)
-
-        return "\n".join(lines).strip()
-
-    except Exception as e:
-        print(f"[AUTOTRADER DESCRIPTION ERROR] {detail_url} -> {e}")
-        return ""
+    text = html_lib.unescape(text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def parse_kijiji_date(date_str):
-    """Parse Kijiji ISO-ish timestamps into timezone-aware datetime."""
     if not date_str:
         return None
     try:
@@ -250,46 +169,31 @@ def parse_kijiji_date(date_str):
 
 
 def fetch_swoopa_listing_info(listing_id: str, account_config: dict) -> dict | None:
-    """
-    Get JSON details for one Swoopa listing.
-    """
     detail_template = account_config.get("detail_url_template")
     if not detail_template:
-        print("❌ No detail_url_template in config")
+        print("No detail_url_template in config")
         return None
 
     detail_url = detail_template.format(id=listing_id)
-    print(f"\n➡️ DETAIL URL for {listing_id}: {detail_url}")
 
     try:
         resp = requests.get(detail_url, headers=account_config["headers"], timeout=15)
-        print("   STATUS:", resp.status_code)
-
         if resp.status_code != 200:
-            print("   BODY (first 200 chars):", resp.text[:200])
+            print(f"Swoopa detail failed {listing_id}: {resp.status_code}")
             return None
-
-        data = resp.json()
-        print("   KEYS:", list(data.keys()))
-        print(
-            "   listing_description preview:",
-            (data.get("listing_description") or "")[:80],
-        )
-        return data
-
+        return resp.json()
     except requests.RequestException as e:
-        print("   ERROR:", e)
+        print("Swoopa detail error:", e)
         return None
 
 
 def find_autos_listings(obj, results=None):
-    """Recursively find all 'AutosListing:*' nodes inside Kijiji JSON."""
     if results is None:
         results = {}
 
     if isinstance(obj, dict):
         for k, v in obj.items():
-            if k.startswith("AutosListing:"):
+            if isinstance(k, str) and k.startswith("AutosListing:"):
                 results[k] = v
             else:
                 find_autos_listings(v, results)
@@ -311,44 +215,143 @@ def build_autotrader_detail_url(listing_url: str) -> str:
 
 def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
     """
-    Open Autotrader detail page and fetch full description using Playwright.
+    Reads AutoTrader full seller notes from the detail page using Playwright.
+    It targets the actual seller notes container:
+      #sellerNotesSection div[class*='SellerNotesSection_content__']
+    and clicks See more / Voir plus if available.
     """
     detail_url = build_autotrader_detail_url(listing_url)
     if not detail_url:
         return ""
 
     try:
-        page.goto(detail_url, wait_until="domcontentloaded", timeout=60000)
+        page.goto(detail_url, wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(1200)
 
-        selectors = [
-            "div.SellerNotesSection_content__te2EB",
-            "div[class*='SellerNotesSection_content__']",
+        # Wait for either seller notes section or content block
+        try:
+            page.wait_for_selector(
+                "#sellerNotesSection, div[class*='SellerNotesSection_content__']",
+                timeout=20000,
+            )
+        except PlaywrightTimeoutError:
+            return ""
+
+        # Click "See more" / "Voir plus" inside seller notes if present
+        expand_selectors = [
+            "#sellerNotesSection button[aria-label*='See more']",
+            "#sellerNotesSection button[aria-label*='Voir plus']",
+            "#sellerNotesSection button:has-text('See more')",
+            "#sellerNotesSection button:has-text('Voir plus')",
         ]
 
-        for selector in selectors:
+        for selector in expand_selectors:
             try:
-                page.wait_for_selector(selector, timeout=15000)
-                locator = page.locator(selector).first
-
-                if locator.count() > 0:
-                    raw_html = locator.inner_html()
-                    cleaned = clean_html_description(raw_html)
-                    if cleaned:
-                        return cleaned
-            except PlaywrightTimeoutError:
-                continue
+                btn = page.locator(selector).first
+                if btn.count() > 0 and btn.is_visible():
+                    btn.scroll_into_view_if_needed()
+                    btn.click(timeout=3000)
+                    page.wait_for_timeout(1000)
+                    break
             except Exception:
-                continue
+                pass
 
-        return ""
+        # Main selector from the seller notes section
+        content = page.locator(
+            "#sellerNotesSection div[class*='SellerNotesSection_content__']"
+        ).first
+
+        # Fallback if main selector is not found
+        if content.count() == 0:
+            content = page.locator("div[class*='SellerNotesSection_content__']").first
+
+        if content.count() == 0:
+            return ""
+
+        # Get both plain text and HTML, then keep the better result
+        plain_text = ""
+        html_text = ""
+
+        try:
+            plain_text = normalize_plain_text(content.inner_text(timeout=5000))
+        except Exception:
+            pass
+
+        try:
+            raw_html = content.inner_html(timeout=5000)
+            html_text = clean_html_description(raw_html)
+        except Exception:
+            pass
+
+        # Return the longer non-empty result
+        best = plain_text if len(plain_text) >= len(html_text) else html_text
+        return best.strip()
 
     except Exception as e:
         print(f"[AUTOTRADER DESCRIPTION ERROR] {detail_url} -> {e}")
         return ""
 
 
+def fetch_swoopa_marketplace(account: str, pages: int, with_description: bool):
+    if account not in SWOOPA_ACCOUNTS:
+        raise HTTPException(status_code=400, detail="Invalid Swoopa account")
+
+    swoopa = SWOOPA_ACCOUNTS[account]
+    url = swoopa["url"]
+    headers = swoopa["headers"]
+
+    all_results = []
+
+    for _ in range(pages):
+        try:
+            r = requests.get(url, headers=headers, timeout=20)
+            r.raise_for_status()
+        except requests.RequestException as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Swoopa {account} request failed: {str(e)}",
+            )
+
+        try:
+            data = r.json()
+        except ValueError:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Swoopa {account} returned non-JSON response",
+            )
+
+        all_results.extend(data.get("results", []))
+
+        url = data.get("next")
+        if not url:
+            break
+
+        time.sleep(1)
+
+    if with_description:
+        enriched = []
+        for item in all_results:
+            listing_id = item.get("id")
+            desc = None
+
+            if listing_id:
+                info_data = fetch_swoopa_listing_info(listing_id, swoopa)
+                if info_data:
+                    desc = info_data.get("listing_description")
+
+            item["listing_description"] = desc
+            enriched.append(item)
+
+        all_results = enriched
+
+    return {
+        "count": len(all_results),
+        "results": all_results,
+    }
+
+
 # =============================
-# FASTAPI ENDPOINTS
+# ENDPOINTS
 # =============================
 
 @app.get("/")
@@ -365,13 +368,11 @@ def read_root():
     }
 
 
-# ---------- Autotrader ----------
-
 @app.get("/scrape_autotrader")
 def scrape_autotrader():
     """
-    Scrape Autotrader listings and return structured data.
-    Full description is fetched from detail page using Playwright.
+    Scrape AutoTrader listings.
+    Full description is fetched from the detail page with Playwright.
     """
     try:
         response = requests.get(
@@ -494,97 +495,95 @@ def scrape_autotrader():
         )
 
 
-# ---------- Kijiji ----------
-
 @app.get("/scrape_kijiji")
 def scrape_kijiji():
-    r = requests.get(
-        URLKIJII,
-        params=PARAMSKIJII,
-        headers=HEADERSKIJII,
-        cookies=COOKIESKIJII,
-        timeout=30,
-    )
-
-    if r.status_code != 200:
-        raise HTTPException(500, "Request failed")
-
-    match = re.search(
-        r'<script[^>]*type="application/json"[^>]*>(.*?)</script>',
-        r.text,
-        re.DOTALL,
-    )
-
-    if not match:
-        raise HTTPException(500, "Embedded JSON not found")
-
-    raw_json = (
-        match.group(1)
-        .replace("&quot;", '"')
-        .replace("&amp;", "&")
-        .strip()
-    )
-
-    data = json.loads(raw_json)
-
-    listings_map = find_autos_listings(data)
-    now = datetime.now(timezone.utc)
-
-    results = []
-
-    for listing in listings_map.values():
-        attributes = listing.get("attributes", {}).get("all", [])
-
-        def get_attr(name):
-            for a in attributes:
-                if a.get("canonicalName") == name:
-                    vals = a.get("canonicalValues")
-                    return vals[0] if vals else None
-            return None
-
-        activation = parse_kijiji_date(listing.get("activationDate"))
-        sorting = parse_kijiji_date(listing.get("sortingDate"))
-        amount = listing.get("price", {}).get("amount")
-
-        if isinstance(amount, (int, float)):
-            price = amount // 100
-        else:
-            price = amount
-
-        results.append(
-            {
-                "title": listing.get("title"),
-                "description": clean_html_description(listing.get("description") or ""),
-                "price": price,
-                "currency": "CAD",
-                "url": listing.get("url"),
-                "images": listing.get("imageUrls") or [],
-                "brand": get_attr("carmake"),
-                "model": get_attr("carmodel"),
-                "year": get_attr("caryear"),
-                "mileage_km": get_attr("carmileageinkms"),
-                "body_type": get_attr("carbodytype"),
-                "color": get_attr("carcolor"),
-                "doors": get_attr("noofdoors"),
-                "fuel_type": get_attr("carfueltype"),
-                "transmission": get_attr("cartransmission"),
-                "activation_date": activation.isoformat() if activation else None,
-                "sorting_date": sorting.isoformat() if sorting else None,
-                "time_since_activation": (
-                    str(now - activation) if activation else None
-                ),
-            }
+    try:
+        r = requests.get(
+            URLKIJII,
+            params=PARAMSKIJII,
+            headers=HEADERSKIJII,
+            cookies=COOKIESKIJII,
+            timeout=30,
         )
 
-    results.sort(key=lambda x: x["sorting_date"] or "", reverse=True)
+        if r.status_code != 200:
+            raise HTTPException(status_code=500, detail="Request failed")
 
-    return {
-        "count": len(results),
-        "cars": results,
-    }
+        match = re.search(
+            r'<script[^>]*type="application/json"[^>]*>(.*?)</script>',
+            r.text,
+            re.DOTALL,
+        )
 
+        if not match:
+            raise HTTPException(status_code=500, detail="Embedded JSON not found")
 
-# ---------- Swoopa: primary ----------
+        raw_json = (
+            match.group(1)
+            .replace("&quot;", '"')
+            .replace("&amp;", "&")
+            .strip()
+        )
+
+        data = json.loads(raw_json)
+
+        listings_map = find_autos_listings(data)
+        now = datetime.now(timezone.utc)
+
+        results = []
+
+        for listing in listings_map.values():
+            attributes = listing.get("attributes", {}).get("all", [])
+
+            def get_attr(name):
+                for a in attributes:
+                    if a.get("canonicalName") == name:
+                        vals = a.get("canonicalValues")
+                        return vals[0] if vals else None
+                return None
+
+            activation = parse_kijiji_date(listing.get("activationDate"))
+            sorting = parse_kijiji_date(listing.get("sortingDate"))
+            amount = listing.get("price", {}).get("amount")
+
+            if isinstance(amount, (int, float)):
+                price = amount // 100
+            else:
+                price = amount
+
+            results.append(
+                {
+                    "title": listing.get("title"),
+                    "description": clean_html_description(listing.get("description") or ""),
+                    "price": price,
+                    "currency": "CAD",
+                    "url": listing.get("url"),
+                    "images": listing.get("imageUrls") or [],
+                    "brand": get_attr("carmake"),
+                    "model": get_attr("carmodel"),
+                    "year": get_attr("caryear"),
+                    "mileage_km": get_attr("carmileageinkms"),
+                    "body_type": get_attr("carbodytype"),
+                    "color": get_attr("carcolor"),
+                    "doors": get_attr("noofdoors"),
+                    "fuel_type": get_attr("carfueltype"),
+                    "transmission": get_attr("cartransmission"),
+                    "activation_date": activation.isoformat() if activation else None,
+                    "sorting_date": sorting.isoformat() if sorting else None,
+                    "time_since_activation": str(now - activation) if activation else None,
+                }
+            )
+
+        results.sort(key=lambda x: x["sorting_date"] or "", reverse=True)
+
+        return {
+            "count": len(results),
+            "cars": results,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Kijiji error: {str(e)}")
+
 
 @app.get("/fetch-marketplace-primary")
 def fetch_marketplace_primary(
@@ -592,67 +591,8 @@ def fetch_marketplace_primary(
     account: str = Query("primary"),
     with_description: bool = True,
 ):
-    """
-    Fetch Swoopa listings for primary account.
-    """
-    if account not in SWOOPA_ACCOUNTS:
-        raise HTTPException(status_code=400, detail="Invalid Swoopa account")
+    return fetch_swoopa_marketplace(account=account, pages=pages, with_description=with_description)
 
-    swoopa = SWOOPA_ACCOUNTS[account]
-    url = swoopa["url"]
-    headers = swoopa["headers"]
-
-    all_results = []
-
-    for _ in range(pages):
-        try:
-            r = requests.get(url, headers=headers, timeout=20)
-            r.raise_for_status()
-        except requests.RequestException as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Swoopa {account} request failed: {str(e)}",
-            )
-
-        try:
-            data = r.json()
-        except ValueError:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Swoopa {account} returned non-JSON response",
-            )
-
-        all_results.extend(data.get("results", []))
-
-        url = data.get("next")
-        if not url:
-            break
-
-        time.sleep(1)
-
-    if with_description:
-        enriched = []
-        for item in all_results:
-            listing_id = item.get("id")
-            desc = None
-
-            if listing_id:
-                info_data = fetch_swoopa_listing_info(listing_id, swoopa)
-                if info_data:
-                    desc = info_data.get("listing_description")
-
-            item["listing_description"] = desc
-            enriched.append(item)
-
-        all_results = enriched
-
-    return {
-        "count": len(all_results),
-        "results": all_results,
-    }
-
-
-# ---------- Swoopa: secondary ----------
 
 @app.get("/fetch-marketplace-secondary")
 def fetch_marketplace_secondary(
@@ -660,72 +600,10 @@ def fetch_marketplace_secondary(
     account: str = Query("secondary"),
     with_description: bool = True,
 ):
-    """
-    Fetch Swoopa listings for secondary account.
-    """
-    if account not in SWOOPA_ACCOUNTS:
-        raise HTTPException(status_code=400, detail="Invalid Swoopa account")
+    return fetch_swoopa_marketplace(account=account, pages=pages, with_description=with_description)
 
-    swoopa = SWOOPA_ACCOUNTS[account]
-    url = swoopa["url"]
-    headers = swoopa["headers"]
-
-    all_results = []
-
-    for _ in range(pages):
-        try:
-            r = requests.get(url, headers=headers, timeout=20)
-            r.raise_for_status()
-        except requests.RequestException as e:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Swoopa {account} request failed: {str(e)}",
-            )
-
-        try:
-            data = r.json()
-        except ValueError:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Swoopa {account} returned non-JSON response",
-            )
-
-        all_results.extend(data.get("results", []))
-
-        url = data.get("next")
-        if not url:
-            break
-
-        time.sleep(1)
-
-    if with_description:
-        enriched = []
-        for item in all_results:
-            listing_id = item.get("id")
-            desc = None
-
-            if listing_id:
-                info_data = fetch_swoopa_listing_info(listing_id, swoopa)
-                if info_data:
-                    desc = info_data.get("listing_description")
-
-            item["listing_description"] = desc
-            enriched.append(item)
-
-        all_results = enriched
-
-    return {
-        "count": len(all_results),
-        "results": all_results,
-    }
-
-
-# ---------- Health Check ----------
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
 
-
-# Optional local run:
-# uvicorn this_file_name:app --reload --port 9000
