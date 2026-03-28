@@ -131,6 +131,75 @@ SWOOPA_ACCOUNTS = {
 # HELPERS
 # =============================
 
+def normalize_plain_text(text: str) -> str:
+    if not text:
+        return ""
+    text = html_lib.unescape(text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def build_autotrader_detail_url(listing_url: str) -> str:
+    if not listing_url:
+        return ""
+    if listing_url.startswith("/"):
+        return f"https://www.autotrader.ca{listing_url}"
+    return listing_url
+
+
+def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
+    detail_url = build_autotrader_detail_url(listing_url)
+    if not detail_url:
+        return ""
+
+    try:
+        page.goto(detail_url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(2000)
+
+        page.wait_for_selector("#sellerNotesSection", timeout=20000)
+        seller_root = page.locator("#sellerNotesSection").first
+
+        try:
+            expand_btn = seller_root.locator("button").filter(
+                has_text=re.compile(r"See more|Voir plus", re.I)
+            ).first
+
+            if expand_btn.count() > 0 and expand_btn.is_visible():
+                expand_btn.scroll_into_view_if_needed()
+                expand_btn.click(timeout=3000)
+                page.wait_for_timeout(1500)
+        except Exception:
+            pass
+
+        raw_text = seller_root.inner_text(timeout=8000)
+        raw_text = normalize_plain_text(raw_text)
+
+        lines = []
+        for line in raw_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if re.fullmatch(r"See more|See less|Voir plus|Voir moins", line, re.I):
+                continue
+            lines.append(line)
+
+        final_text = "\n".join(lines).strip()
+        final_text = normalize_plain_text(final_text)
+
+        if len(final_text) < 40:
+            return ""
+
+        return final_text
+
+    except PlaywrightTimeoutError:
+        return ""
+    except Exception as e:
+        print(f"[AUTOTRADER DESCRIPTION ERROR] {detail_url} -> {e}")
+        return ""
+
+
 def clean_html_description(text: str) -> str:
     if not text:
         return ""
@@ -142,14 +211,6 @@ def clean_html_description(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
-
-def normalize_plain_text(text: str) -> str:
-    if not text:
-        return ""
-    text = html_lib.unescape(text)
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
 
 
 def parse_kijiji_date(date_str):
@@ -219,13 +280,6 @@ def add_cookies_to_context(context, cookies_dict: dict, domain: str):
         context.add_cookies(cookies_to_add)
 
 
-def build_autotrader_detail_url(listing_url: str) -> str:
-    if not listing_url:
-        return ""
-    if listing_url.startswith("/"):
-        return f"https://www.autotrader.ca{listing_url}"
-    return listing_url
-
 
 def build_kijiji_detail_url(listing_url: str) -> str:
     if not listing_url:
@@ -235,109 +289,6 @@ def build_kijiji_detail_url(listing_url: str) -> str:
     return listing_url
 
 
-def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
-    """
-    يدخل صفحة الإعلان ثم يقرأ seller notes بالكامل.
-    """
-    detail_url = build_autotrader_detail_url(listing_url)
-    if not detail_url:
-        return ""
-
-    try:
-        page.goto(detail_url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(2000)
-
-        expand_selectors = [
-            "#sellerNotesSection button[aria-label*='See more']",
-            "#sellerNotesSection button[aria-label*='Voir plus']",
-            "#sellerNotesSection button:has-text('See more')",
-            "#sellerNotesSection button:has-text('Voir plus')",
-            "button[aria-label*='See more']",
-            "button[aria-label*='Voir plus']",
-            "button:has-text('See more')",
-            "button:has-text('Voir plus')",
-        ]
-
-        for selector in expand_selectors:
-            try:
-                btn = page.locator(selector).first
-                if btn.count() > 0 and btn.is_visible():
-                    btn.scroll_into_view_if_needed()
-                    btn.click(timeout=3000)
-                    page.wait_for_timeout(1200)
-                    break
-            except Exception:
-                pass
-
-        text = page.evaluate(
-            """
-            () => {
-                const clean = (s) => {
-                    if (!s) return "";
-                    return s
-                        .replace(/\\u00A0/g, " ")
-                        .replace(/\\r/g, "")
-                        .replace(/[ \\t]+\\n/g, "\\n")
-                        .replace(/\\n{3,}/g, "\\n\\n")
-                        .trim();
-                };
-
-                const seller = document.querySelector(
-                    '#sellerNotesSection div[class*="SellerNotesSection_content__"], div[class*="SellerNotesSection_content__"]'
-                );
-
-                if (seller) {
-                    const raw = seller.textContent || seller.innerText || "";
-                    const out = clean(raw);
-                    if (out) return out;
-                }
-
-                const all = Array.from(document.querySelectorAll("body *"));
-                const label = all.find(el =>
-                    /^(Vehicle Description|Description du véhicule)$/i.test(
-                        (el.textContent || "").trim()
-                    )
-                );
-
-                if (label) {
-                    let node = label;
-                    for (let i = 0; i < 7 && node; i++, node = node.parentElement) {
-                        const raw = node.innerText || node.textContent || "";
-                        const txt = clean(raw);
-
-                        if (!txt) continue;
-
-                        if (
-                            /Vehicle Description|Description du véhicule/i.test(txt) &&
-                            txt.length > 40
-                        ) {
-                            let lines = txt
-                                .split("\\n")
-                                .map(x => x.trim())
-                                .filter(Boolean);
-
-                            lines = lines.filter(x =>
-                                !/^(Vehicle Description|Description du véhicule|See more|See less|Voir plus|Voir moins)$/i.test(x)
-                            );
-
-                            return clean(lines.join("\\n"));
-                        }
-                    }
-                }
-
-                return "";
-            }
-            """
-        )
-
-        text = normalize_plain_text(text)
-        if len(text) < 30:
-            return ""
-        return text
-
-    except Exception as e:
-        print(f"[AUTOTRADER DESCRIPTION ERROR] {detail_url} -> {e}")
-        return ""
 
 
 def extract_longest_description_from_obj(obj) -> str:
@@ -820,11 +771,9 @@ def scrape_autotrader():
                 description = fetch_autotrader_full_description_playwright(page, url)
                 description_source = "detail_page_playwright"
 
-                # fallback اختياري فقط لو فشل
                 if not description:
-                    raw_description = car.get("description", "") or ""
-                    description = clean_html_description(raw_description)
-                    description_source = "search_results_snippet"
+                    description = ""
+                    description_source = "detail_page_failed"
 
                 title = f"{year} {make} {model}".strip()
 
