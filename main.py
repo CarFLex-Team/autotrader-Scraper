@@ -616,6 +616,119 @@ def fetch_swoopa_marketplace(account: str, pages: int, with_description: bool):
 # ENDPOINTS
 # =============================
 
+def build_autotrader_detail_url(listing_url: str) -> str:
+    if not listing_url:
+        return ""
+    if listing_url.startswith("/"):
+        return f"https://www.autotrader.ca{listing_url}"
+    return listing_url
+
+
+def normalize_plain_text(text: str) -> str:
+    if not text:
+        return ""
+    text = html_lib.unescape(text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def add_autotrader_cookies_to_context(context):
+    cookies_to_add = []
+
+    for name, value in COOKIES.items():
+        if value:
+            cookies_to_add.append(
+                {
+                    "name": name,
+                    "value": value,
+                    "domain": ".autotrader.ca",
+                    "path": "/",
+                    "secure": True,
+                }
+            )
+
+    if cookies_to_add:
+        context.add_cookies(cookies_to_add)
+
+
+def extract_autotrader_description_from_body(body_text: str) -> str:
+    body_text = normalize_plain_text(body_text)
+
+    patterns = [
+        r"Vehicle Description\s*(.+?)(?:How do you like the site\?|Car insurance|Verified History Report|Seller|Report listing|Disclaimer:|Back to top)",
+        r"Description du véhicule\s*(.+?)(?:Comment aimez-vous le site|Assurance automobile|Rapport d'historique|Vendeur|Signaler l'annonce|Avis de non-responsabilité|Retour en haut)",
+    ]
+
+    for pattern in patterns:
+        m = re.search(pattern, body_text, re.DOTALL | re.IGNORECASE)
+        if m:
+            desc = normalize_plain_text(m.group(1))
+            if len(desc) > 40:
+                return desc
+
+    return ""
+
+
+def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
+    detail_url = build_autotrader_detail_url(listing_url)
+    if not detail_url:
+        return ""
+
+    try:
+        page.goto(detail_url, wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(1500)
+
+        # لو فيه See more جوه seller notes
+        expand_selectors = [
+            "#sellerNotesSection button[aria-label*='See more']",
+            "#sellerNotesSection button[aria-label*='Voir plus']",
+            "#sellerNotesSection button:has-text('See more')",
+            "#sellerNotesSection button:has-text('Voir plus')",
+            "button[aria-label*='See more']",
+            "button[aria-label*='Voir plus']",
+            "button:has-text('See more')",
+            "button:has-text('Voir plus')",
+        ]
+
+        for selector in expand_selectors:
+            try:
+                btn = page.locator(selector).first
+                if btn.count() > 0 and btn.is_visible():
+                    btn.scroll_into_view_if_needed()
+                    btn.click(timeout=3000)
+                    page.wait_for_timeout(1000)
+                    break
+            except Exception:
+                pass
+
+        # 1) جرّب العنصر الحقيقي للوصف
+        try:
+            content = page.locator(
+                "#sellerNotesSection div[class*='SellerNotesSection_content__'], div[class*='SellerNotesSection_content__']"
+            ).first
+
+            if content.count() > 0:
+                txt = normalize_plain_text(content.inner_text(timeout=5000))
+                if len(txt) > 40:
+                    return txt
+        except Exception:
+            pass
+
+        # 2) fallback قوي: استخرج الوصف من body text بين headings
+        body_text = page.locator("body").inner_text(timeout=10000)
+        desc = extract_autotrader_description_from_body(body_text)
+        if desc:
+            return desc
+
+        return ""
+
+    except Exception as e:
+        print(f"[AUTOTRADER DESCRIPTION ERROR] {detail_url} -> {e}")
+        return ""
+
+
 @app.get("/")
 def read_root():
     return {
@@ -633,8 +746,8 @@ def read_root():
 @app.get("/scrape_autotrader")
 def scrape_autotrader():
     """
-    يدخل صفحة كل إعلان AutoTrader أولًا، يسحب الوصف الكامل،
-    وبعدها فقط يبني car_data.
+    Scrape Autotrader listings and return structured data.
+    يدخل صفحة الإعلان أولًا ويحسب description من صفحة العربية نفسها.
     """
     try:
         response = requests.get(
@@ -682,7 +795,8 @@ def scrape_autotrader():
                 ignore_https_errors=True,
                 locale="en-CA",
             )
-            add_cookies_to_context(context, COOKIES, ".autotrader.ca")
+
+            add_autotrader_cookies_to_context(context)
 
             page = context.new_page()
             page.set_default_timeout(20000)
@@ -702,15 +816,24 @@ def scrape_autotrader():
                 url = car.get("url", "")
                 image = car["images"][0] if car.get("images") else None
 
+                # الوصف من صفحة العربية نفسها
                 description = fetch_autotrader_full_description_playwright(page, url)
                 description_source = "detail_page_playwright"
 
+                # fallback اختياري فقط لو فشل
                 if not description:
                     raw_description = car.get("description", "") or ""
                     description = clean_html_description(raw_description)
                     description_source = "search_results_snippet"
 
                 title = f"{year} {make} {model}".strip()
+
+                print("=" * 80)
+                print("TITLE:", title)
+                print("URL:", url)
+                print("DESC_SOURCE:", description_source)
+                print("DESC_LEN:", len(description))
+                print("DESC_PREVIEW:", repr(description[:400]))
 
                 car_data = {
                     "title": title,
