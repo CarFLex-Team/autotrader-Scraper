@@ -45,7 +45,6 @@ HEADERSKIJII = {
 }
 
 COOKIESKIJII = {
-    
     "kjses": "a3ada55c-3dda-4d3b-a2f1-5a2dc3e6d11e",
 }
 
@@ -95,7 +94,6 @@ HEADERS = {
 }
 
 COOKIES = {
-
     "as24Visitor": "c3c760d9-0878-408d-a19b-2180d1931375",
 }
 
@@ -215,10 +213,8 @@ def build_autotrader_detail_url(listing_url: str) -> str:
 
 def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
     """
-    Reads AutoTrader full seller notes from the detail page using Playwright.
-    It targets the actual seller notes container:
-      #sellerNotesSection div[class*='SellerNotesSection_content__']
-    and clicks See more / Voir plus if available.
+    يدخل صفحة الإعلان ثم يقرأ الـ seller notes بالكامل.
+    يحاول الضغط على See more / Voir plus إن وجدت.
     """
     detail_url = build_autotrader_detail_url(listing_url)
     if not detail_url:
@@ -228,7 +224,6 @@ def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
         page.goto(detail_url, wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(1200)
 
-        # Wait for either seller notes section or content block
         try:
             page.wait_for_selector(
                 "#sellerNotesSection, div[class*='SellerNotesSection_content__']",
@@ -237,7 +232,7 @@ def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
         except PlaywrightTimeoutError:
             return ""
 
-        # Click "See more" / "Voir plus" inside seller notes if present
+        # لو زر See more موجود داخل seller notes
         expand_selectors = [
             "#sellerNotesSection button[aria-label*='See more']",
             "#sellerNotesSection button[aria-label*='Voir plus']",
@@ -256,19 +251,16 @@ def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
             except Exception:
                 pass
 
-        # Main selector from the seller notes section
         content = page.locator(
             "#sellerNotesSection div[class*='SellerNotesSection_content__']"
         ).first
 
-        # Fallback if main selector is not found
         if content.count() == 0:
             content = page.locator("div[class*='SellerNotesSection_content__']").first
 
         if content.count() == 0:
             return ""
 
-        # Get both plain text and HTML, then keep the better result
         plain_text = ""
         html_text = ""
 
@@ -283,9 +275,14 @@ def fetch_autotrader_full_description_playwright(page, listing_url: str) -> str:
         except Exception:
             pass
 
-        # Return the longer non-empty result
         best = plain_text if len(plain_text) >= len(html_text) else html_text
-        return best.strip()
+        best = best.strip()
+
+        # اعتبر الوصف غير مفيد لو قصير جدًا
+        if len(best) < 20:
+            return ""
+
+        return best
 
     except Exception as e:
         print(f"[AUTOTRADER DESCRIPTION ERROR] {detail_url} -> {e}")
@@ -371,8 +368,9 @@ def read_root():
 @app.get("/scrape_autotrader")
 def scrape_autotrader():
     """
-    Scrape AutoTrader listings.
-    Full description is fetched from the detail page with Playwright.
+    يجيب نتائج AutoTrader.
+    يدخل صفحة كل إعلان أولًا لسحب الوصف الكامل،
+    ثم بعد ذلك فقط يبني car_data.
     """
     try:
         response = requests.get(
@@ -434,17 +432,19 @@ def scrape_autotrader():
                 price = price_data.get("priceFormatted", "")
                 city = location.get("city", "")
                 url = car.get("url", "")
-
                 image = car["images"][0] if car.get("images") else None
 
+                # 1) ادخل على اللينك الأول واسحب الوصف
                 description = fetch_autotrader_full_description_playwright(page, url)
                 description_source = "detail_page_playwright"
 
+                # 2) fallback لو فشل فقط
                 if not description:
                     raw_description = car.get("description", "") or ""
                     description = clean_html_description(raw_description)
                     description_source = "search_results_snippet"
 
+                # 3) بعد ما الوصف يخلص، ابنِ car details
                 title = f"{year} {make} {model}".strip()
 
                 car_data = {
@@ -591,7 +591,11 @@ def fetch_marketplace_primary(
     account: str = Query("primary"),
     with_description: bool = True,
 ):
-    return fetch_swoopa_marketplace(account=account, pages=pages, with_description=with_description)
+    return fetch_swoopa_marketplace(
+        account=account,
+        pages=pages,
+        with_description=with_description,
+    )
 
 
 @app.get("/fetch-marketplace-secondary")
@@ -600,10 +604,15 @@ def fetch_marketplace_secondary(
     account: str = Query("secondary"),
     with_description: bool = True,
 ):
-    return fetch_swoopa_marketplace(account=account, pages=pages, with_description=with_description)
+    return fetch_swoopa_marketplace(
+        account=account,
+        pages=pages,
+        with_description=with_description,
+    )
 
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "autotrader_scraper"}
+
 
