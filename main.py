@@ -44,6 +44,113 @@ COOKIESKIJII = {
     "kjses": "a3ada55c-3dda-4d3b-a2f1-5a2dc3e6d11e",
 }
 
+# ----------dis--------------------
+
+def clean_html_description(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def find_longest_description(obj) -> str:
+    """
+    يدور recursively على أي حقل اسمه description أو قريب منه
+    ويرجع أطول نص موجود.
+    """
+    best = ""
+
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            key = str(k).lower()
+
+            if isinstance(v, str) and any(word in key for word in [
+                "description",
+                "comments",
+                "comment",
+                "sellercomment",
+                "overview",
+                "details",
+            ]):
+                cleaned = clean_html_description(v)
+                if len(cleaned) > len(best):
+                    best = cleaned
+
+            candidate = find_longest_description(v)
+            if len(candidate) > len(best):
+                best = candidate
+
+    elif isinstance(obj, list):
+        for item in obj:
+            candidate = find_longest_description(item)
+            if len(candidate) > len(best):
+                best = candidate
+
+    return best
+
+
+def fetch_autotrader_full_description(listing_url: str) -> str:
+    if not listing_url:
+        return ""
+
+    if listing_url.startswith("/"):
+        detail_url = f"https://www.autotrader.ca{listing_url}"
+    else:
+        detail_url = listing_url
+
+    try:
+        resp = requests.get(
+            detail_url,
+            headers=HEADERS,
+            cookies=COOKIES,
+            verify=False,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        html = resp.text
+
+        # جرّب كل script application/json وخد أطول description
+        scripts = re.findall(
+            r'<script[^>]+type="application/json"[^>]*>(.*?)</script>',
+            html,
+            re.DOTALL,
+        )
+
+        best = ""
+        for block in scripts:
+            try:
+                block_json = json.loads(block.replace("&quot;", '"'))
+            except Exception:
+                continue
+
+            candidate = find_longest_description(block_json)
+            if len(candidate) > len(best):
+                best = candidate
+
+        if best:
+            return best
+
+        # fallback: لو الوصف موجود كنص داخل الصفحة
+        m = re.search(
+            r'"description"\s*:\s*"((?:\\.|[^"\\])*)"',
+            html,
+            re.DOTALL,
+        )
+        if m:
+            raw = m.group(1)
+            raw = raw.encode("utf-8").decode("unicode_escape")
+            raw = raw.replace("\\/", "/")
+            return clean_html_description(raw)
+
+    except requests.RequestException:
+        return ""
+
+    return ""
+
 # ---------- AutoTrader ----------
 
 URL = "https://www.autotrader.ca/lst"
@@ -273,9 +380,11 @@ def scrape_autotrader():
 
             image = car["images"][0] if car.get("images") else None
 
-            raw_description = car.get("description", "") or ""
-            description = re.sub(r"<br\s*/?>", "\n", raw_description)
-            description = re.sub(r"<[^>]+>", "", description).strip()
+            description = fetch_autotrader_full_description(url)
+
+            if not description:
+                raw_description = car.get("description", "") or ""
+                description = clean_html_description(raw_description)
 
             title = f"{year} {make} {model}".strip()
 
